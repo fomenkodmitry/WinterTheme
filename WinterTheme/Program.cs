@@ -17,6 +17,13 @@ internal static class Program
             return 0;
         }
 
+        // README screenshots, rendered offscreen with the real simulation and painter
+        if (args.Length == 2 && args[0] == "--render-screens")
+        {
+            Demo.DemoRenderer.Run(args[1]);
+            return 0;
+        }
+
         // one snow layer is enough: quit if another copy is already running
         try
         {

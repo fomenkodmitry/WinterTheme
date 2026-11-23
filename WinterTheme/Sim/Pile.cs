@@ -12,6 +12,11 @@ public class Pile
     public readonly float MaxSlope;
     public readonly bool EdgeSpill;
 
+    /// <summary>Optional per-bin height limit (window caps are uneven, not a flat slab).</summary>
+    protected float[]? Caps;
+
+    public float CapAt(float x) => Caps?[BinOf(x)] ?? MaxH;
+
     /// <summary>Relaxation does not move snow across this bin boundary (used by the tractor blade).</summary>
     public int Wall = -1;
 
@@ -60,7 +65,7 @@ public class Pile
     public void AddBin(int i, float amount)
     {
         if ((uint)i >= (uint)N) return;
-        H[i] = Math.Min(MaxH, H[i] + amount);
+        H[i] = Math.Min(Caps?[i] ?? MaxH, H[i] + amount);
     }
 
     /// <summary>Remove up to <paramref name="perBin"/> from every bin in [x0, x1]; returns total removed.</summary>
@@ -159,5 +164,9 @@ public sealed class WindowPile : Pile
     {
         Id = id;
         Bx = x; By = y; Bw = w; Bh = h;
+        Caps = new float[N];
+        float seed = id * 0.37f;
+        for (int i = 0; i < N; i++)
+            Caps[i] = MaxH * (0.62f + 0.2f * MathF.Sin(i * 0.045f + seed) + 0.12f * MathF.Sin(i * 0.17f + seed * 3) + 0.06f);
     }
 }

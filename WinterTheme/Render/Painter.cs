@@ -123,6 +123,7 @@ public sealed class Painter
                    new[] { Snow, Snow, SnowShade }, new[] { 0f, Math.Clamp(1 - shadeDepth / Math.Max(maxH, 1), 0, 0.95f), 1f },
                    SKShaderTileMode.Clamp))
         {
+            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
             _fill.Shader = sh;
             c.DrawPath(path, _fill);
             _fill.Shader = null;
@@ -243,6 +244,7 @@ public sealed class Painter
         using (var glow = SKShader.CreateRadialGradient(new SKPoint(x, y + 6), 11,
                    new[] { A(col, 0.55f * on), A(col, 0) }, null, SKShaderTileMode.Clamp))
         {
+            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
             _fill.Shader = glow;
             c.DrawCircle(x, y + 6, 11, _fill);
             _fill.Shader = null;
@@ -297,6 +299,7 @@ public sealed class Painter
                    new[] { Snow, new SKColor(236, 243, 251), new SKColor(196, 213, 233) }, new[] { 0f, 0.55f, 1f },
                    SKShaderTileMode.Clamp))
         {
+            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
             _fill.Shader = sh;
             c.DrawCircle(b.X, b.Y, b.R, _fill);
             _fill.Shader = null;
@@ -426,6 +429,7 @@ public sealed class Painter
                 path.Close();
                 using var sh = SKShader.CreateLinearGradient(new SKPoint(head.X - r, 0), new SKPoint(head.X + r, 0),
                     new[] { new SKColor(120, 130, 145), new SKColor(205, 212, 222), new SKColor(110, 118, 132) }, null, SKShaderTileMode.Clamp);
+                _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
                 _fill.Shader = sh;
                 c.DrawPath(path, _fill);
                 _fill.Shader = null;
@@ -504,6 +508,7 @@ public sealed class Painter
             pile.QuadTo(88 + ph * 1.4f, -ph * 0.1f, 90 + ph * 1.6f, 0);
             pile.Close();
             using var sh = SKShader.CreateLinearGradient(new SKPoint(0, -ph), new SKPoint(0, 0), new[] { Snow, SnowShade }, null, SKShaderTileMode.Clamp);
+            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
             _fill.Shader = sh;
             c.DrawPath(pile, _fill);
             _fill.Shader = null;
@@ -567,6 +572,7 @@ public sealed class Painter
         if (flash)
         {
             using var glow = SKShader.CreateRadialGradient(new SKPoint(-28, -118), 26, new[] { new SKColor(255, 170, 0, 150), new SKColor(255, 170, 0, 0) }, null, SKShaderTileMode.Clamp);
+            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
             _fill.Shader = glow;
             c.DrawCircle(-28, -118, 26, _fill);
             _fill.Shader = null;
@@ -847,6 +853,7 @@ public sealed class Painter
         if (lead)
         {
             using var glow = SKShader.CreateRadialGradient(new SKPoint(x + 25, -33), 9, new[] { new SKColor(255, 40, 40, 200), new SKColor(255, 40, 40, 0) }, null, SKShaderTileMode.Clamp);
+            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
             _fill.Shader = glow;
             c.DrawCircle(x + 25, -33, 9, _fill);
             _fill.Shader = null;

@@ -15,20 +15,29 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
 - Santa flies by with reindeer and drops a present. Click the present to open it.
 - A garland of lights hangs under the menu bar.
 
+![Snow on windows, a snowman and Santa](docs/hero.jpg)
+
+| Rolling a snowball | The Grinch took the nose | The tractor clears the drift |
+|---|---|---|
+| ![](docs/building.jpg) | ![](docs/grinch.jpg) | ![](docs/tractor.jpg) |
+
+The screenshots are rendered with the app's own simulation and painter on a mock desktop:
+`dotnet run --project WinterTheme -c Release -- --render-screens docs`.
+
 Snowmen and settled snow are saved in `~/Library/Application Support/WinterTheme/`.
 
 ## Run
 
 ```bash
 dotnet run --project WinterTheme   # dev
-./build-app.sh                     # dist/WinterTheme-1.0.0-arm64.dmg (Apple Silicon)
+./build-app.sh                     # dist/WinterTheme-1.0.1-arm64.dmg (Apple Silicon)
 ARCH=x64 ./build-app.sh            # Intel
 ARCH=all VERSION=1.1.0 ./build-app.sh
 ```
 
 ## Install
 
-Download [`release/WinterTheme-1.0.0-arm64.dmg`](release/WinterTheme-1.0.0-arm64.dmg) (Apple Silicon).
+Download [`release/WinterTheme-1.0.1-arm64.dmg`](release/WinterTheme-1.0.1-arm64.dmg) (Apple Silicon).
 Open the `.dmg` and drag **WinterTheme** onto **Applications**. Then start it from Launchpad or Spotlight.
 The snowflake appears in the menu bar. Turn on "Запускать при входе" there to start it at login.
 

@@ -192,6 +192,9 @@ public sealed class World
                 float s = p.SurfaceY(x);
                 if (y0 <= s && y1 >= s && p.VisibleAt(x))
                 {
+                    // snow falls in front of windows too: only part of it settles, and a full cap lets it pass
+                    if (p.HeightAt(x) >= p.CapAt(x) - 0.4f) continue;
+                    if (absorbOnBalls && Rng.NextDouble() > 0.45) continue;
                     p.Add(x, amount);
                     return true;
                 }
