@@ -37,13 +37,19 @@ ARCH=all VERSION=1.1.0 ./build-app.sh
 
 ## Install
 
-Download [`release/WinterTheme-1.0.1-arm64.dmg`](release/WinterTheme-1.0.1-arm64.dmg) (Apple Silicon).
-Open the `.dmg` and drag **WinterTheme** onto **Applications**. Then start it from Launchpad or Spotlight.
+Apple Silicon, one line in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fomenkodmitry/WinterTheme/main/install.sh | bash
+```
+
+It downloads the DMG, copies the app to `/Applications` and starts it. Files downloaded with `curl` are not quarantined, so there is no Gatekeeper prompt.
 The snowflake appears in the menu bar. Turn on "Запускать при входе" there to start it at login.
 
-The app is ad-hoc signed, not notarized. If macOS blocks it on another Mac, go to
-System Settings → Privacy & Security and click "Open Anyway", or run
-`xattr -dr com.apple.quarantine /Applications/WinterTheme.app`.
+Or download [`release/WinterTheme-1.0.1-arm64.dmg`](release/WinterTheme-1.0.1-arm64.dmg) and drag **WinterTheme** onto **Applications**.
+The app is ad-hoc signed, not notarized, so macOS says it cannot verify that the app is free of malware. To open it anyway, do one of these:
+- System Settings → Privacy & Security → click "Open Anyway" next to the WinterTheme message.
+- Run `xattr -dr com.apple.quarantine /Applications/WinterTheme.app`.
 
 ## How it works
 
