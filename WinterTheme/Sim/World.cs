@@ -830,8 +830,18 @@ public sealed partial class World
     private void UpdateBalls(float dt)
     {
         for (int i = Balls.Count - 1; i >= 0; i--)
-            if (Balls[i].Flying && Fly(Balls[i], dt))
-                Balls.RemoveAt(i);
+        {
+            var fb = Balls[i];
+            if (!fb.Flying) continue;
+            // substeps of at most ~20 pt, so a fast snowball cannot jump over the Grinch at low frame rates
+            int n = Math.Clamp((int)MathF.Ceiling(MathF.Sqrt(fb.VX * fb.VX + fb.VY * fb.VY) * dt / 20), 1, 8);
+            for (int k = 0; k < n; k++)
+            {
+                if (!Fly(fb, dt / n)) continue;
+                Balls.Remove(fb);
+                break;
+            }
+        }
 
         List<Ball>? broken = null;
 

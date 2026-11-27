@@ -764,7 +764,12 @@ public sealed partial class World
             if (!p.VisibleAt(x)) return null;
             return new SKPoint(x, p.SurfaceY(x));
         }
-        return new SKPoint(b.PerchX, Ground.SurfaceY(b.PerchX));
+        // on the drift, or on top of a ball lying there
+        float y = Ground.SurfaceY(b.PerchX);
+        foreach (var root in Balls)
+            if (root.Below == null && !root.Flying && MathF.Abs(root.X - b.PerchX) < root.R * 0.8f)
+                y = Math.Min(y, root.Top.Y - root.Top.R * 0.95f);
+        return new SKPoint(b.PerchX, y);
     }
 
     private void Scare(Bird b, float fromX = float.NaN)

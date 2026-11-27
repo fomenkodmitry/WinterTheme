@@ -16,9 +16,9 @@ public sealed class SceneControl : Control, ICustomHitTest
     private readonly World _world;
     private readonly OverlayWindow _owner;
     private readonly Painter _painter = new();
-    private TimeSpan? _last;
-    private float _acc;
-    private bool _running;
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _last;
+    private Avalonia.Threading.DispatcherTimer? _timer;
 
     public SceneControl(World world, OverlayWindow owner)
     {
@@ -27,41 +27,43 @@ public sealed class SceneControl : Control, ICustomHitTest
         ClipToBounds = false;
     }
 
+    // A plain timer at the chosen frame rate. RequestAnimationFrame fires on every vsync (120 Hz on ProMotion)
+    // and keeps the render loop busy even on frames where nothing is drawn.
+    private static TimeSpan Interval => TimeSpan.FromSeconds(1.0 / Settings.Current.FrameRate);
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        _running = true;
-        TopLevel.GetTopLevel(this)?.RequestAnimationFrame(OnFrame);
+        _last = _clock.Elapsed.TotalSeconds;
+        _timer = new Avalonia.Threading.DispatcherTimer(Interval, Avalonia.Threading.DispatcherPriority.Render, (_, _) => OnFrame());
+        _timer.Start();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        _running = false;
+        _timer?.Stop();
+        _timer = null;
         base.OnDetachedFromVisualTree(e);
     }
 
-    private void OnFrame(TimeSpan now)
+    private void OnFrame()
     {
-        if (!_running) return;
-        float dt = _last is null ? 1 / 60f : (float)(now - _last.Value).TotalSeconds;
+        if (_timer == null) return;
+        Diag.Frame();
+        double now = _clock.Elapsed.TotalSeconds;
+        float step = (float)Math.Clamp(now - _last, 0, 0.05);
         _last = now;
-        _acc += Math.Clamp(dt, 0, 0.1f);
+        if (_timer.Interval != Interval) _timer.Interval = Interval;
 
-        // 30 fps by default (cheap), 60 fps when "smooth" is on; never more, even on ProMotion
-        if (_acc >= (Settings.Current.Smooth60 ? 1 / 62f : 1 / 31f))
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        lock (_world)
         {
-            float step = Math.Min(_acc, 0.05f);
-            _acc = 0;
-            lock (_world)
-            {
-                _world.PollInput();
-                _world.Update(step);
-            }
-            _owner.Tick();
-            InvalidateVisual();
+            _world.PollInput();
+            _world.Update(step);
         }
-
-        TopLevel.GetTopLevel(this)?.RequestAnimationFrame(OnFrame);
+        Diag.Update(System.Diagnostics.Stopwatch.GetTimestamp() - t0);
+        _owner.Tick();
+        InvalidateVisual();
     }
 
     public override void Render(DrawingContext context)
@@ -95,11 +97,13 @@ public sealed class SceneControl : Control, ICustomHitTest
             using var api = lease.Lease();
             var canvas = api.SkCanvas;
             canvas.Save();
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             lock (_world)
             {
                 lock (_painter)
                     _painter.Draw(canvas, _world);
             }
+            Diag.Draw(System.Diagnostics.Stopwatch.GetTimestamp() - t0);
             canvas.Restore();
         }
     }

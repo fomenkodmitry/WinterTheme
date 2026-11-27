@@ -72,7 +72,7 @@ public sealed class OverlayWindow : Window
             Cocoa.RestoreFront(_prevApp);
         }
 
-        _reassert -= 1 / 60f;
+        _reassert -= 1f / Settings.Current.FrameRate;
         if (_reassert <= 0)
         {
             _reassert = 3;

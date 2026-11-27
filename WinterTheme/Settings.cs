@@ -23,7 +23,13 @@ public sealed class Settings
     public bool AutoTractor { get; set; } = true;
     public bool ShowInScreenshots { get; set; }
     public bool Paused { get; set; }
+    /// <summary>Old "smooth" switch; kept so that existing settings files load as 60 fps.</summary>
     public bool Smooth60 { get; set; }
+
+    /// <summary>Frames per second: 20 (saves battery), 30 or 60.</summary>
+    public int Fps { get; set; } = 30;
+
+    public int FrameRate => Smooth60 ? 60 : Fps is 20 or 30 or 60 ? Fps : 30;
     public bool NewYearShow { get; set; } = true;
     public bool ShootingStars { get; set; } = true;
     public bool Chatter { get; set; } = true;

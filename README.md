@@ -38,6 +38,8 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
   or throw a snowball across. Displays must touch side by side in System Settings → Displays.
   Turn it off with "Мониторы как один экран".
 
+The full list of features and easter eggs (in Russian) is in [FEATURES.md](FEATURES.md).
+
 ![Snow on windows, a snowman and Santa](docs/hero.jpg)
 
 | Rolling a snowball | The Grinch took the nose | The tractor clears the drift |
@@ -104,5 +106,8 @@ The app is ad-hoc signed, not notarized, so macOS says it cannot verify that the
   Reading window bounds does not need the Screen Recording permission.
 - `Sim/` holds the simulation: heightmap piles with slope relaxation, flakes, particles, snowballs, the tractor, the Grinch and Santa.
   `Render/Painter` draws everything with SkiaSharp.
-- The overlay runs at 30 fps by default. "Плавно (60 fps)" in the menu turns on 60 fps, which uses more CPU.
+- The overlay runs at 30 fps by default; "Кадров в секунду" in the menu switches between 20, 30 and 60.
+  Frames are driven by a timer, not by every vsync. Flakes, glints and garland bulbs are sprites from one texture
+  drawn with a single `DrawAtlas` call, and drift outlines are cached and rebuilt only when the snow visibly changes.
+  Set `WINTERTHEME_DIAG=/path/to/log` to log frame and draw timings.
   The snow is hidden from screenshots unless "Видно на скриншотах" is on.

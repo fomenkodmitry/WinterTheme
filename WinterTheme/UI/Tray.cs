@@ -70,7 +70,24 @@ public static class Tray
 
         if (LoginItem.Available)
             menu.Items.Add(Toggle("Запускать при входе", () => LoginItem.Enabled, LoginItem.Set));
-        menu.Items.Add(Toggle("Плавно (60 fps, больше CPU)", () => s.Smooth60, v => s.Smooth60 = v));
+        var fps = new NativeMenuItem("Кадров в секунду");
+        var fpsMenu = new NativeMenu();
+        var fpsItems = new List<NativeMenuItem>();
+        foreach (var (rate, label) in new[] { (20, "20 — экономно"), (30, "30 — обычно"), (60, "60 — плавно, больше CPU") })
+        {
+            var it = new NativeMenuItem(label) { ToggleType = NativeMenuItemToggleType.Radio, IsChecked = s.FrameRate == rate };
+            it.Click += (_, _) =>
+            {
+                s.Fps = rate;
+                s.Smooth60 = false;
+                foreach (var r in fpsItems) r.IsChecked = r == it;
+                s.Save();
+            };
+            fpsItems.Add(it);
+            fpsMenu.Items.Add(it);
+        }
+        fps.Menu = fpsMenu;
+        menu.Items.Add(fps);
         menu.Items.Add(Toggle("Видно на скриншотах", () => s.ShowInScreenshots, v => { s.ShowInScreenshots = v; app.ApplyWindowSettings(); }));
 
         menu.Items.Add(new NativeMenuItemSeparator());

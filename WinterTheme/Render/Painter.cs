@@ -27,63 +27,229 @@ public sealed class Painter
 
     public void Draw(SKCanvas c, World w)
     {
+        Diag.Begin();
         c.Clear(SKColors.Transparent);
         if (w.Aurora > 0.01f) DrawAurora(c, w);
         DrawFlakes(c, w, far: true);
+        Diag.Mark(0);
         if (w.Santa.Active) DrawSanta(c, w);
+        Diag.Mark(1);
         foreach (var p in w.PileOrder)
         {
             DrawPile(c, p, true, w.Time, 15);
             if (p.Icicles.Count > 0) DrawIcicles(c, p);
         }
+        Diag.Mark(2);
         if (Settings.Current.Garland) DrawGarland(c, w);
+        Diag.Mark(3);
         DrawPile(c, w.Ground, false, w.Time, 60);
+        Diag.Mark(4);
         foreach (var p in w.Presents) DrawPresent(c, p);
         if (w.Tractor.Active) DrawTractor(c, w);
+        Diag.Mark(5);
         DrawBalls(c, w);
+        Diag.Mark(6);
         foreach (var h in w.Hats) DrawFlyingHat(c, h);
         foreach (var b in w.Birds) DrawBird(c, b);
         if (w.Grinch.Active) DrawGrinch(c, w);
+        Diag.Mark(7);
         DrawParticles(c, w);
+        Diag.Mark(8);
         DrawFlakes(c, w, far: false);
+        Diag.Mark(9);
         DrawBubbles(c, w);
         DrawHint(c, w);
+        Diag.Mark(10);
     }
 
     // ------------------------------------------------------------------ snow
 
+    // ------------------------------------------------------------------ sprite atlas
+    // Flakes and garland bulbs are small sprites drawn with DrawAtlas: one native call (and one GPU draw)
+    // for hundreds of them, instead of one call per circle, line and gradient.
+
+    private const int BulbBox = 48; // px; a bulb sprite covers 24x24 pt around the bulb at 2x
+    private static readonly int[] DotPx = { 4, 8, 16 };
+    private static readonly SKRect[] DotRects = { new(0, 0, 4, 4), new(4, 0, 12, 8), new(12, 0, 28, 16) };
+    private static readonly SKRect StarRect = new(28, 0, 60, 32);
+    private const float StarR = 13; // px, spoke length in the star sprite
+    private static readonly SKRect GlintRect = new(60, 0, 92, 32);
+    private const float GlintR = 13; // px, arm length of the glint sprite
+    private SKImage? _atlas;
+    private readonly SKPaint _atlasPaint = new() { IsAntialias = true, FilterQuality = SKFilterQuality.Low };
+
+    private SKRect BulbRect(int color, bool lit) =>
+        SKRect.Create(color * BulbBox, 32 + (lit ? 0 : BulbBox), BulbBox, BulbBox);
+
+    private SKImage Atlas()
+    {
+        if (_atlas != null) return _atlas;
+        int w = Math.Max(96, Bulbs.Length * BulbBox), h = 32 + 2 * BulbBox;
+        using var surface = SKSurface.Create(new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul));
+        var c = surface.Canvas;
+        c.Clear(SKColors.Transparent);
+        using var p = new SKPaint { IsAntialias = true, Color = SKColors.White };
+
+        for (int i = 0; i < DotRects.Length; i++)
+            c.DrawCircle(DotRects[i].MidX, DotRects[i].MidY, DotPx[i] / 2f - 0.5f, p);
+
+        // three spokes and a dot, like the big near flakes
+        p.Style = SKPaintStyle.Stroke;
+        p.StrokeCap = SKStrokeCap.Round;
+        p.StrokeWidth = 2.4f;
+        float cx = StarRect.MidX, cy = StarRect.MidY;
+        for (int k = 0; k < 3; k++)
+        {
+            float a = k * MathF.PI / 3;
+            c.DrawLine(cx - MathF.Cos(a) * StarR, cy - MathF.Sin(a) * StarR, cx + MathF.Cos(a) * StarR, cy + MathF.Sin(a) * StarR, p);
+        }
+        p.Style = SKPaintStyle.Fill;
+        c.DrawCircle(cx, cy, 3.25f, p);
+
+        // glint on the snow: a small cross with a bluish dot
+        p.Style = SKPaintStyle.Stroke;
+        p.StrokeWidth = 2.2f;
+        p.Color = new SKColor(255, 255, 255, 230);
+        float gx = GlintRect.MidX, gy = GlintRect.MidY;
+        c.DrawLine(gx - GlintR, gy, gx + GlintR, gy, p);
+        c.DrawLine(gx, gy - GlintR, gx, gy + GlintR, p);
+        p.Style = SKPaintStyle.Fill;
+        p.Color = new SKColor(190, 220, 255, 220);
+        c.DrawCircle(gx, gy, 2.6f, p);
+        p.Color = SKColors.White;
+
+        // bulbs, drawn at 2x around (bx, by) = top of the bulb socket
+        for (int i = 0; i < Bulbs.Length; i++)
+        {
+            foreach (bool lit in new[] { true, false })
+            {
+                var r = BulbRect(i, lit);
+                c.Save();
+                c.Translate(r.MidX, r.Top + BulbBox / 4f);
+                c.Scale(2);
+                DrawBulbShape(c, p, Bulbs[i], lit);
+                c.Restore();
+            }
+        }
+        _atlas = surface.Snapshot();
+        return _atlas;
+    }
+
+    /// <summary>A bulb at (0, 0); lit = glow and full color, otherwise a dim bulb without glow.</summary>
+    private static void DrawBulbShape(SKCanvas c, SKPaint p, SKColor col, bool lit)
+    {
+        p.Style = SKPaintStyle.Fill;
+        if (lit)
+        {
+            using var glow = SKShader.CreateRadialGradient(new SKPoint(0, 6), 11, new[] { A(col, 0.55f), A(col, 0) }, null, SKShaderTileMode.Clamp);
+            p.Shader = glow;
+            p.Color = SKColors.White;
+            c.DrawCircle(0, 6, 11, p);
+            p.Shader = null;
+        }
+        p.Color = new SKColor(40, 70, 45);
+        c.DrawRect(-1.8f, 0, 3.6f, 3, p);
+        float k = lit ? 1 : 0.45f;
+        p.Color = new SKColor((byte)(col.Red * k), (byte)(col.Green * k), (byte)(col.Blue * k));
+        c.DrawOval(0, 6.5f, 2.8f, 4f, p);
+        if (lit)
+        {
+            p.Color = new SKColor(255, 255, 255, 160);
+            c.DrawCircle(-0.9f, 5.2f, 0.9f, p);
+        }
+    }
+
+    private readonly List<SKRect> _aRects = new(1024);
+    private readonly List<SKRotationScaleMatrix> _aXforms = new(1024);
+    private readonly List<SKColor> _aColors = new(1024);
+
+    private void AtlasBegin()
+    {
+        _aRects.Clear();
+        _aXforms.Clear();
+        _aColors.Clear();
+    }
+
+    /// <summary>Queues a sprite whose pixel (ax, ay), relative to the sprite's own corner, lands on (x, y).</summary>
+    private void AtlasAdd(SKRect sprite, float x, float y, float scale, float radians, float ax, float ay, float alpha)
+    {
+        _aRects.Add(sprite);
+        _aXforms.Add(SKRotationScaleMatrix.Create(scale, radians, x, y, ax, ay));
+        _aColors.Add(SKColors.White.WithAlpha((byte)(Math.Clamp(alpha, 0, 1) * 255)));
+    }
+
+    private void AtlasFlush(SKCanvas c)
+    {
+        if (_aRects.Count == 0) return;
+        c.DrawAtlas(Atlas(), _aRects.ToArray(), _aXforms.ToArray(), _aColors.ToArray(), SKBlendMode.Modulate, _atlasPaint);
+        AtlasBegin();
+    }
+
     private void DrawFlakes(SKCanvas c, World w, bool far)
     {
-        _stroke.StrokeWidth = 0.8f;
+        float px = Math.Max(1, c.TotalMatrix.ScaleX); // device pixels per point
+        AtlasBegin();
         foreach (var f in w.Flakes)
         {
             if (far != f.Depth < 0.4f) continue;
             float a = far ? 0.35f + f.Depth : 0.75f + f.Depth * 0.25f;
             if (!far && f.Size > 3.0f)
             {
-                _stroke.Color = A(Snow, a);
-                float r = f.Size * 1.25f;
-                for (int k = 0; k < 3; k++)
-                {
-                    float ang = f.Spin + k * MathF.PI / 3;
-                    float dx = MathF.Cos(ang) * r, dy = MathF.Sin(ang) * r;
-                    c.DrawLine(f.X - dx, f.Y - dy, f.X + dx, f.Y + dy, _stroke);
-                }
-                _fill.Color = A(Snow, a);
-                c.DrawCircle(f.X, f.Y, 1.1f, _fill);
+                var r = StarRect;
+                AtlasAdd(r, f.X, f.Y, f.Size * 1.25f / StarR, f.Spin, r.Width / 2, r.Height / 2, a);
             }
             else
             {
-                _fill.Color = A(Snow, a);
-                c.DrawCircle(f.X, f.Y, f.Size * 0.6f, _fill);
+                float d = f.Size * 1.2f; // diameter in points
+                int i = 0;
+                while (i < DotPx.Length - 1 && DotPx[i] < d * px) i++;
+                var r = DotRects[i];
+                AtlasAdd(r, f.X, f.Y, d / DotPx[i], 0, r.Width / 2, r.Height / 2, a);
             }
         }
+        AtlasFlush(c);
     }
 
-    private void DrawPile(SKCanvas c, Pile p, bool useVis, float time, float shadeDepth)
+    private sealed class PileCache
     {
-        using var path = new SKPath();
+        public readonly SKPath Path = new();
+        public float[] Snap = Array.Empty<float>();
+        public bool[] Vis = Array.Empty<bool>();
+        public float BaseY = float.NaN, MaxH;
+        public SKShader? Shader;
+        public int Age;
+    }
+
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Pile, PileCache> _piles = new();
+
+    /// <summary>
+    /// The outline of a pile changes by fractions of a point per frame, so it is rebuilt only every few frames
+    /// (or at once after a big change: a ball picking up snow, the tractor, the cursor). Reusing the same SKPath
+    /// between rebuilds also lets Skia reuse its GPU tessellation.
+    /// </summary>
+    private PileCache PileShape(Pile p, bool useVis, float shadeDepth)
+    {
+        var pc = _piles.GetValue(p, _ => new PileCache());
         int n = p.N;
+        pc.Age++;
+        bool dirty = pc.Snap.Length != n || pc.BaseY != p.BaseY;
+        float limit = pc.Age >= 6 ? 0.4f : 2.5f;
+        for (int k = 0; !dirty && k < n; k++)
+            dirty = MathF.Abs(p.H[k] - pc.Snap[k]) > limit || (useVis && pc.Vis[k] != p.Visible[k]);
+        if (!dirty) return pc;
+        pc.Age = 0;
+
+        if (pc.Snap.Length != n)
+        {
+            pc.Snap = new float[n];
+            pc.Vis = new bool[n];
+        }
+        Array.Copy(p.H, pc.Snap, n);
+        Array.Copy(p.Visible, pc.Vis, n);
+        pc.BaseY = p.BaseY;
+
+        var path = pc.Path;
+        path.Reset();
         int i = 0;
         float maxH = 0;
         while (i < n)
@@ -116,31 +282,47 @@ public sealed class Painter
             path.LineTo(x1, p.BaseY);
             path.Close();
         }
-        if (path.IsEmpty) return;
+        pc.MaxH = maxH;
+        pc.Shader?.Dispose();
+        pc.Shader = path.IsEmpty ? null : SKShader.CreateLinearGradient(
+            new SKPoint(0, p.BaseY - maxH), new SKPoint(0, p.BaseY + 1),
+            new[] { Snow, Snow, SnowShade }, new[] { 0f, Math.Clamp(1 - shadeDepth / Math.Max(maxH, 1), 0, 0.95f), 1f },
+            SKShaderTileMode.Clamp);
+        return pc;
+    }
 
-        // soft drop shadow so snow reads on white windows too
+    private void DrawPile(SKCanvas c, Pile p, bool useVis, float time, float shadeDepth)
+    {
+        var pc = PileShape(p, useVis, shadeDepth);
+        var path = pc.Path;
+        if (path.IsEmpty) return;
+        int n = p.N;
+
+        if (useVis)
+        {
+            // soft drop shadow so snow reads on white windows too (the ground does not need it)
+            c.Save();
+            c.Translate(0, 1.2f);
+            _fill.Color = new SKColor(40, 60, 90, 45);
+            c.DrawPath(path, _fill);
+            c.Restore();
+        }
+
+        // outline of the surface: the same shape shifted up a little, under the snow. A stroke would make Skia
+        // re-stroke the long path on the CPU every frame; a fill of the cached path is much cheaper.
         c.Save();
-        c.Translate(0, 1.2f);
-        _fill.Color = new SKColor(40, 60, 90, 45);
+        c.Translate(0, -0.9f);
+        _fill.Color = new SKColor(150, 175, 210, 140);
         c.DrawPath(path, _fill);
         c.Restore();
 
-        using (var sh = SKShader.CreateLinearGradient(
-                   new SKPoint(0, p.BaseY - maxH), new SKPoint(0, p.BaseY + 1),
-                   new[] { Snow, Snow, SnowShade }, new[] { 0f, Math.Clamp(1 - shadeDepth / Math.Max(maxH, 1), 0, 0.95f), 1f },
-                   SKShaderTileMode.Clamp))
-        {
-            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
-            _fill.Shader = sh;
-            c.DrawPath(path, _fill);
-            _fill.Shader = null;
-        }
+        _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
+        _fill.Shader = pc.Shader;
+        c.DrawPath(path, _fill);
+        _fill.Shader = null;
 
-        _stroke.StrokeWidth = 0.9f;
-        _stroke.Color = new SKColor(150, 175, 210, 110);
-        c.DrawPath(path, _stroke);
-
-        // glints
+        // glints, batched through the sprite atlas
+        AtlasBegin();
         for (int k = 0; k < n; k++)
         {
             if (p.H[k] < 4 || (useVis && !p.Visible[k])) continue;
@@ -150,13 +332,9 @@ public sealed class Painter
             if (tw < 0.55f) continue;
             float gx = p.BinCenter(k), gy = p.BaseY - p.H[k] + 2 + h % 5;
             float r = 2.2f * (tw - 0.5f) * 2;
-            _stroke.StrokeWidth = 0.8f;
-            _stroke.Color = new SKColor(255, 255, 255, 230);
-            c.DrawLine(gx - r, gy, gx + r, gy, _stroke);
-            c.DrawLine(gx, gy - r, gx, gy + r, _stroke);
-            _fill.Color = new SKColor(190, 220, 255, 200);
-            c.DrawCircle(gx, gy, 0.9f, _fill);
+            AtlasAdd(GlintRect, gx, gy, r / GlintR, 0, GlintRect.Width / 2, GlintRect.Height / 2, 1);
         }
+        AtlasFlush(c);
     }
 
     private void DrawParticles(SKCanvas c, World w)
@@ -266,59 +444,55 @@ public sealed class Painter
         new(255, 70, 70), new(255, 200, 60), new(70, 220, 110), new(80, 160, 255), new(255, 110, 200),
     };
 
+    private SKPath? _wire;
+    private float _wireW, _wireY;
+
     private void DrawGarland(SKCanvas c, World w)
     {
         float y = w.MenuBarH + 1;
         const float span = 150, sag = 13;
         int segs = (int)MathF.Ceiling(w.W / span);
         int mode = (int)(w.Time / 12) % 3;
+        if (_wire == null || _wireW != w.W || _wireY != y)
+        {
+            _wire?.Dispose();
+            _wire = new SKPath();
+            for (int s = 0; s < segs; s++)
+            {
+                float x0 = s * span;
+                _wire.MoveTo(x0, y);
+                _wire.QuadTo(x0 + span / 2, y + sag * 2, x0 + span, y);
+            }
+            _wireW = w.W;
+            _wireY = y;
+        }
         _stroke.StrokeWidth = 1.3f;
         _stroke.Color = new SKColor(25, 60, 35, 220);
-        int bulb = 0;
-        for (int s = 0; s < segs; s++)
+        c.DrawPath(_wire, _stroke);
+
+        // dim bulbs first, then the lit layer on top faded by how bright each bulb is
+        int bulbs = segs * 5;
+        for (int pass = 0; pass < 2; pass++)
         {
-            float x0 = s * span, x1 = x0 + span, cx = (x0 + x1) / 2;
-            using (var path = new SKPath())
+            bool lit = pass == 1;
+            AtlasBegin();
+            for (int bulb = 0; bulb < bulbs; bulb++)
             {
-                path.MoveTo(x0, y);
-                path.QuadTo(cx, y + sag * 2, x1, y);
-                c.DrawPath(path, _stroke);
-            }
-            for (int k = 1; k <= 5; k++)
-            {
-                float t = k / 6f;
+                int s = bulb / 5, k = bulb % 5 + 1;
+                float x0 = s * span, x1 = x0 + span, cx = (x0 + x1) / 2, t = k / 6f;
                 float bx = (1 - t) * (1 - t) * x0 + 2 * (1 - t) * t * cx + t * t * x1;
                 float by = (1 - t) * (1 - t) * y + 2 * (1 - t) * t * (y + sag * 2) + t * t * y;
-                var col = Bulbs[bulb % Bulbs.Length];
                 float on = mode switch
                 {
                     0 => (bulb + (int)(w.Time * 3)) % 3 == 0 ? 1f : 0.35f,
                     1 => 0.4f + 0.6f * MathF.Max(0, MathF.Sin(w.Time * 4 + bulb * 2.39f)),
                     _ => 0.55f + 0.45f * MathF.Sin(w.Time * 1.5f),
                 };
-                DrawBulb(c, bx, by, col, on);
-                bulb++;
+                var r = BulbRect(bulb % Bulbs.Length, lit);
+                AtlasAdd(r, bx, by, 0.5f, 0, BulbBox / 2f, BulbBox / 4f, lit ? on : 1);
             }
+            AtlasFlush(c);
         }
-    }
-
-    private void DrawBulb(SKCanvas c, float x, float y, SKColor col, float on)
-    {
-        using (var glow = SKShader.CreateRadialGradient(new SKPoint(x, y + 6), 11,
-                   new[] { A(col, 0.55f * on), A(col, 0) }, null, SKShaderTileMode.Clamp))
-        {
-            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
-            _fill.Shader = glow;
-            c.DrawCircle(x, y + 6, 11, _fill);
-            _fill.Shader = null;
-        }
-        _fill.Color = new SKColor(40, 70, 45);
-        c.DrawRect(x - 1.8f, y, 3.6f, 3, _fill);
-        var lit = new SKColor((byte)(col.Red * (0.45f + 0.55f * on)), (byte)(col.Green * (0.45f + 0.55f * on)), (byte)(col.Blue * (0.45f + 0.55f * on)));
-        _fill.Color = lit;
-        c.DrawOval(x, y + 6.5f, 2.8f, 4f, _fill);
-        _fill.Color = new SKColor(255, 255, 255, (byte)(160 * on));
-        c.DrawCircle(x - 0.9f, y + 5.2f, 0.9f, _fill);
     }
 
     // ------------------------------------------------------------------ snowballs & snowmen
