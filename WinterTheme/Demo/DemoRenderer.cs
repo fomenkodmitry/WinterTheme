@@ -9,9 +9,10 @@ namespace WinterTheme.Demo;
 /// Renders README screenshots offscreen: the real simulation and painter on top of a mock desktop.
 /// Run with: WinterTheme --render-screens &lt;dir&gt;
 /// </summary>
-public static class DemoRenderer
+public static partial class DemoRenderer
 {
-    private const float W = 1280, H = 800, MenuH = 25, Scale = 2;
+    private static float W = 1280, H = 800, Scale = 2;
+    private const float MenuH = 25;
     private const float Dt = 1 / 30f;
 
     private sealed record MockWindow(int Id, SKRect Rect, bool Dark, string Title);

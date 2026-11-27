@@ -24,6 +24,13 @@ internal static class Program
             return 0;
         }
 
+        // promo video frames (encoded to mp4 separately)
+        if (args.Length == 2 && args[0] == "--render-video")
+        {
+            Demo.DemoRenderer.RenderPromo(args[1]);
+            return 0;
+        }
+
         // one snow layer is enough: quit if another copy is already running
         try
         {

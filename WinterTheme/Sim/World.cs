@@ -68,6 +68,22 @@ public sealed partial class World
 
     // ------------------------------------------------------------------ input
 
+    /// <summary>Scripted input for the offscreen promo video (same bookkeeping as <see cref="PollInput"/>).</summary>
+    internal void FeedInput(float x, float y, bool down, bool option)
+    {
+        _pmx = Mx;
+        _pmy = My;
+        Mx = x;
+        My = y;
+        MouseInside = x >= 0 && y >= 0 && x < W && y < H;
+        _prevDown = MouseDown;
+        MouseDown = down;
+        OptionDown = option;
+    }
+
+    /// <summary>For the promo video: the next opened present gives a plain wish, not a random surprise.</summary>
+    internal bool NextPresentPlain;
+
     public void PollInput()
     {
         var p = Quartz.MouseLocation();
@@ -962,7 +978,8 @@ public sealed partial class World
         Presents.Remove(p);
         float x = p.X, y = p.Y;
         SKPoint At() => new(x, y - 40);
-        double r = Rng.NextDouble();
+        double r = NextPresentPlain ? 0.99 : Rng.NextDouble();
+        NextPresentPlain = false;
 
         if (p.Coal || r < 0.10)
         {
