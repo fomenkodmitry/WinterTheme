@@ -23,6 +23,10 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
 - At midnight on Dec 31 there is a 10-second countdown, then fireworks, confetti and Santa.
   To see it right away, choose "Репетиция Нового года" in the menu. Fireworks are also in the menu ("Салют!").
 - A garland of lights hangs under the menu bar.
+- **Several displays work as one desktop:** Santa flies across all of them, the tractor drives on to the next display
+  and clears it too, and the Grinch runs through. Drag a snowball or a whole snowman onto the other display,
+  or throw a snowball across. Displays must touch side by side in System Settings → Displays.
+  Turn it off with "Мониторы как один экран".
 
 ![Snow on windows, a snowman and Santa](docs/hero.jpg)
 
@@ -34,6 +38,8 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
 |---|---|
 | ![](docs/fireworks.jpg) | ![](docs/snowball.jpg) |
 
+![Santa crossing from one display to the next](docs/two-displays.jpg)
+
 The screenshots are rendered with the app's own simulation and painter on a mock desktop:
 `dotnet run --project WinterTheme -c Release -- --render-screens docs`.
 
@@ -43,9 +49,9 @@ Snowmen and settled snow are saved in `~/Library/Application Support/WinterTheme
 
 ```bash
 dotnet run --project WinterTheme   # dev
-./build-app.sh                     # dist/WinterTheme-1.1.0-arm64.dmg (Apple Silicon)
+./build-app.sh                     # dist/WinterTheme-1.2.0-arm64.dmg (Apple Silicon)
 ARCH=x64 ./build-app.sh            # Intel
-ARCH=all VERSION=1.1.0 ./build-app.sh
+ARCH=all VERSION=1.2.0 ./build-app.sh
 ```
 
 ## Install
@@ -59,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/fomenkodmitry/WinterTheme/main/inst
 It downloads the DMG, copies the app to `/Applications` and starts it. Files downloaded with `curl` are not quarantined, so there is no Gatekeeper prompt.
 The snowflake appears in the menu bar. Turn on "Запускать при входе" there to start it at login.
 
-Or download [`release/WinterTheme-1.1.0-arm64.dmg`](release/WinterTheme-1.1.0-arm64.dmg) and drag **WinterTheme** onto **Applications**.
+Or download [`release/WinterTheme-1.2.0-arm64.dmg`](release/WinterTheme-1.2.0-arm64.dmg) and drag **WinterTheme** onto **Applications**.
 The app is ad-hoc signed, not notarized, so macOS says it cannot verify that the app is free of malware. To open it anyway, do one of these:
 - System Settings → Privacy & Security → click "Open Anyway" next to the WinterTheme message.
 - Run `xattr -dr com.apple.quarantine /Applications/WinterTheme.app`.

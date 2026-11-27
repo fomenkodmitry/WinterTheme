@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using SkiaSharp;
 using WinterTheme.Native;
 
@@ -81,6 +82,7 @@ public sealed class World
 
     public void Update(float dt)
     {
+        while (_inbox.TryDequeue(out var msg)) msg(this);
         Time += dt;
         UpdateWind(dt);
         UpdateFlakes(dt);
@@ -503,7 +505,7 @@ public sealed class World
         if (Held != null)
         {
             if (MouseDown) DragHeld(dt);
-            if (released || !MouseDown) Release();
+            if (Held != null && (released || !MouseDown)) Release();
         }
 
         if (released && interactiveBefore) ClickReleased = true;
@@ -589,6 +591,13 @@ public sealed class World
 
     private void DragHeld(float dt)
     {
+        // dragged onto the next display: the ball (or the whole snowman) goes with the cursor
+        if ((Mx >= W || Mx < 0) && Next(Mx >= W ? 1 : -1) is { } n)
+        {
+            HandOverHeld(n);
+            return;
+        }
+
         var b = Held!;
         // smoothed hand velocity, used when the ball is let go (a flick throws it)
         float k = Math.Min(1, dt * 14);
@@ -941,6 +950,7 @@ public sealed class World
         Tractor.X = Tractor.Dir > 0 ? -170 : W + 170;
         Tractor.Load = 0;
         Tractor.T = 0;
+        Tractor.Passed = false;
         Say("Бип-бип! Чищу!", () => new SKPoint(Math.Clamp(Tractor.X, 60, W - 60), H - 135), 2.5f);
         React(TractorAlert, 0.5f, Tractor.Dir > 0 ? 0 : W);
     }
@@ -1014,6 +1024,29 @@ public sealed class World
             Spawn(PKind.Smoke, ex, ey, -t.Dir * Rand(5, 20), Rand(-45, -25), Rand(3, 5), Rand(1.2f, 2f), new SKColor(120, 120, 130));
         }
 
+        // drive on to the next display; snow scraped here after the handover is sent along
+        if (Next(t.Dir) is { } next)
+        {
+            if (!t.Passed)
+            {
+                float nx = t.X + Dx(next);
+                if (t.Dir > 0 ? nx >= -170 : nx <= next.W + 170)
+                {
+                    t.Passed = true;
+                    t.LoadSent = t.Load;
+                    float load = t.Load, wheel = t.Wheel, tt = t.T;
+                    int dir = t.Dir;
+                    next.Post(w => w.AcceptTractor(nx, dir, load, wheel, tt));
+                }
+            }
+            else if (t.Load > t.LoadSent)
+            {
+                float delta = t.Load - t.LoadSent;
+                t.LoadSent = t.Load;
+                next.Post(w => { if (w.Tractor.Active) w.Tractor.Load += delta; });
+            }
+        }
+
         if ((t.Dir > 0 && t.X > W + 220) || (t.Dir < 0 && t.X < -220))
         {
             t.Active = false;
@@ -1054,6 +1087,7 @@ public sealed class World
         g.Target = null;
         g.Victim = null;
         g.HitT = 99;
+        g.Passed = false;
 
         object? target = Presents.Where(p => p.Landed).OrderBy(_ => Rng.Next()).FirstOrDefault();
         target ??= Balls.Where(b => b.Below == null && b.Man is { HasNose: true }).OrderBy(_ => Rng.Next()).FirstOrDefault();
@@ -1145,25 +1179,71 @@ public sealed class World
         }
         g.LastStepSin = s;
 
+        if (!g.Passed && g.Target == null && Next(g.Dir) is { } n)
+        {
+            float nx = g.X + Dx(n);
+            if (g.Dir > 0 ? nx >= -60 : nx <= n.W + 60)
+            {
+                g.Passed = true;
+                var copy = new Grinch
+                {
+                    Active = true, X = nx, Dir = g.Dir, State = g.State == GrinchState.Steal ? GrinchState.Escape : g.State,
+                    StateT = g.StateT, Step = g.Step, LastStepSin = g.LastStepSin, HasCarrot = g.HasCarrot,
+                    HasPresent = g.HasPresent, PresentColor = g.PresentColor, HitT = g.HitT,
+                };
+                n.Post(w => w.AcceptGrinch(copy));
+            }
+        }
+
         if (g.X < -120 || g.X > W + 120) g.Active = false;
     }
 
     // ------------------------------------------------------------------ santa
 
-    public void StartSanta()
+    public void StartSanta() => StartSanta(Rng.Next(2) == 0 ? 1 : -1, this);
+
+    /// <summary>Santa starts at the far end of the linked displays and drops the present on <paramref name="dropOn"/>.</summary>
+    private void StartSanta(int dir, World dropOn)
+    {
+        var first = End(-dir);
+        if (first != this) first.Post(w => w.LaunchSanta(dir, dropOn));
+        else LaunchSanta(dir, dropOn);
+    }
+
+    private void LaunchSanta(int dir, World dropOn)
     {
         if (Santa.Active) return;
         var s = Santa;
         s.Active = true;
-        s.Dir = Rng.Next(2) == 0 ? 1 : -1;
+        s.Dir = dir;
         s.X = s.Dir > 0 ? -260 : W + 260;
         s.Y0 = MenuBarH + Rand(70, Math.Max(90, H * 0.28f));
         s.T = 0;
         s.Dropped = false;
         s.DropX = Rand(W * 0.15f, W * 0.85f);
+        s.DropWorld = dropOn;
         s.Extra = 0;
         s.ClickCd = 0;
+        s.Passed = false;
         React(SantaAlert, 0.6f);
+    }
+
+    private void AcceptSanta(float x, float globalY0, float t, int dir, object? dropOn, bool dropped, int extra)
+    {
+        if (Santa.Active) return;
+        var s = Santa;
+        s.Active = true;
+        s.X = x;
+        s.Dir = dir;
+        s.Y0 = Math.Clamp(globalY0 - (float)Screen.Cg.Y, MenuBarH + 50, Math.Max(MenuBarH + 60, H * 0.5f));
+        s.T = t;
+        s.DropWorld = dropOn;
+        s.Dropped = dropped;
+        s.DropX = Rand(W * 0.15f, W * 0.85f);
+        s.Extra = extra;
+        s.ClickCd = 0;
+        s.Passed = false;
+        React(SantaAlert, 0.4f);
     }
 
     private static readonly string[] SantaAlert =
@@ -1231,7 +1311,21 @@ public sealed class World
                 Rand(0.8f, 1.6f), Rng.Next(3) == 0 ? new SKColor(255, 230, 140) : SKColors.White);
         }
 
-        if (!s.Dropped && (s.Dir > 0 ? s.X > s.DropX : s.X < s.DropX))
+        if (!s.Passed && Next(s.Dir) is { } n)
+        {
+            float nx = s.X + Dx(n);
+            if (s.Dir > 0 ? nx >= -260 : nx <= n.W + 260)
+            {
+                s.Passed = true;
+                float gy = s.Y0 + (float)Screen.Cg.Y, t = s.T;
+                int dir = s.Dir, extra = s.Extra;
+                var drop = s.DropWorld;
+                bool dropped = s.Dropped;
+                n.Post(w => w.AcceptSanta(nx, gy, t, dir, drop, dropped, extra));
+            }
+        }
+
+        if (!s.Dropped && (s.DropWorld == null || s.DropWorld == this) && (s.Dir > 0 ? s.X > s.DropX : s.X < s.DropX))
         {
             s.Dropped = true;
             if (Presents.Count < 6)
@@ -1272,7 +1366,12 @@ public sealed class World
             if (_nextSanta <= 0)
             {
                 _nextSanta = Rand(150, 360);
-                StartSanta();
+                // linked displays share one Santa: only the leftmost one rolls the dice
+                if (Next(-1) == null)
+                {
+                    var chain = Chain();
+                    StartSanta(Rng.Next(2) == 0 ? 1 : -1, chain[Rng.Next(chain.Count)]);
+                }
             }
         }
 
@@ -1313,6 +1412,17 @@ public sealed class World
         b.X += b.VX * dt;
         b.Y += b.VY * dt;
         b.Angle += b.VX * dt / b.R;
+
+        // a snowball flies on to the next display
+        int side = b.X >= W ? 1 : b.X < 0 ? -1 : 0;
+        if (side != 0 && Next(side) is { } next)
+        {
+            b.X += Dx(next);
+            b.Y += Dy(next);
+            next.Post(w => w.Balls.Add(b));
+            return true;
+        }
+
         if (b.X < -80 || b.X > W + 80 || b.Y > H + 80) return true;
 
         var g = Grinch;
@@ -1576,6 +1686,116 @@ public sealed class World
         if (Presents.Count > 0) pool.Add("Там подарок! Кликни!");
 
         SayMan(man, Pick(pool.ToArray()), 3);
+    }
+
+    // ------------------------------------------------------------------ linked displays
+
+    /// <summary>Displays that touch this one on the left and right (set by the app).</summary>
+    public World? LeftNeighbor, RightNeighbor;
+
+    private readonly ConcurrentQueue<Action<World>> _inbox = new();
+
+    /// <summary>Runs <paramref name="action"/> on this world at the start of its next update (thread-safe).</summary>
+    public void Post(Action<World> action) => _inbox.Enqueue(action);
+
+    public World? Next(int dir) => !S.LinkScreens ? null : dir > 0 ? RightNeighbor : LeftNeighbor;
+
+    /// <summary>Converts a local x of this world to a local x of <paramref name="other"/>.</summary>
+    private float Dx(World other) => (float)(Screen.Cg.X - other.Screen.Cg.X);
+
+    private float Dy(World other) => (float)(Screen.Cg.Y - other.Screen.Cg.Y);
+
+    private void HandOverHeld(World n)
+    {
+        var held = Held!;
+        var stack = held.StackFromRoot().ToList();
+        foreach (var b in stack)
+        {
+            Balls.Remove(b);
+            b.X += Dx(n);
+            b.Y += Dy(n);
+        }
+        Held = null;
+        float ox = _holdOffX, oy = _holdOffY, vx = _throwVX, vy = _throwVY;
+        n.Post(w => w.AcceptHeld(stack, held, ox, oy, vx, vy));
+    }
+
+    private void AcceptHeld(List<Ball> stack, Ball held, float offX, float offY, float vx, float vy)
+    {
+        Balls.AddRange(stack);
+        if (Held != null)
+        {
+            // already dragging something here (should not happen): just drop it
+            held.Held = false;
+            return;
+        }
+        Held = held;
+        held.Held = true;
+        _holdOffX = offX;
+        _holdOffY = offY;
+        _throwVX = vx;
+        _throwVY = vy;
+    }
+
+    private World End(int dir)
+    {
+        var w = this;
+        for (int guard = 0; guard < 16 && w.Next(dir) is { } n && n != this; guard++) w = n;
+        return w;
+    }
+
+    private List<World> Chain()
+    {
+        var list = new List<World>();
+        for (var w = End(-1); list.Count < 16; w = w.Next(1)!)
+        {
+            list.Add(w);
+            if (w.Next(1) is not { } n || n == list[0]) break;
+        }
+        return list;
+    }
+
+    private void AcceptTractor(float x, int dir, float load, float wheel, float t)
+    {
+        if (Tractor.Active) return;
+        var tr = Tractor;
+        tr.Active = true;
+        tr.X = x;
+        tr.Dir = dir;
+        tr.Load = load;
+        tr.Wheel = wheel;
+        tr.T = t;
+        tr.SmokeT = 0;
+        tr.Passed = false;
+        React(TractorAlert, 0.4f, dir > 0 ? 0 : W);
+    }
+
+    private void AcceptGrinch(Grinch src)
+    {
+        if (Grinch.Active) return;
+        var g = Grinch;
+        g.Active = true;
+        g.X = src.X;
+        g.Dir = src.Dir;
+        g.State = src.State;
+        g.StateT = src.StateT;
+        g.Step = src.Step;
+        g.LastStepSin = src.LastStepSin;
+        g.HasCarrot = src.HasCarrot;
+        g.HasPresent = src.HasPresent;
+        g.PresentColor = src.PresentColor;
+        g.HitT = src.HitT;
+        g.Victim = null;
+        g.Passed = false;
+        g.Target = null;
+        if (g.State == GrinchState.Run)
+        {
+            // still hunting: look for loot ahead on this display
+            bool Ahead(float x) => (x - g.X) * g.Dir > 0;
+            g.Target = (object?)Presents.Where(p => p.Landed && Ahead(p.X)).OrderBy(_ => Rng.Next()).FirstOrDefault()
+                       ?? Balls.Where(b => b.Below == null && b.Man is { HasNose: true } && Ahead(b.X)).OrderBy(_ => Rng.Next()).FirstOrDefault();
+        }
+        if (g.Target != null || g.HasPresent || g.HasCarrot) React(GrinchAlert, 0.6f);
     }
 
     public void Say(string text, Func<SKPoint> anchor, float life = 2.5f, float scale = 1)

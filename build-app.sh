@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="${VERSION:-1.1.0}"
+VERSION="${VERSION:-1.2.0}"
 ARCH="${ARCH:-arm64}"
 [[ "$ARCH" == "all" ]] && ARCHES=(arm64 x64) || ARCHES=("$ARCH")
 

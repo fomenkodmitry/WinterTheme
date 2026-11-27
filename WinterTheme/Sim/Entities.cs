@@ -110,6 +110,8 @@ public sealed class Tractor
     public float Wheel;
     public float SmokeT;
     public float T;
+    public bool Passed;
+    public float LoadSent;
     public const float Scale = 0.95f;
     public float BladeX => X + Dir * 84 * Scale;
     public float PileH => Math.Min(62, Load <= 0 ? 0 : 4 + MathF.Sqrt(Load) * 1.15f);
@@ -140,6 +142,7 @@ public sealed class Grinch
 
     /// <summary>Seconds since the last snowball hit (drawn as a snow splat on the face).</summary>
     public float HitT = 99;
+    public bool Passed;
 }
 
 public sealed class Santa
@@ -153,4 +156,10 @@ public sealed class Santa
     public float TrailT;
     public int Extra;
     public float ClickCd;
+
+    /// <summary>Display where the present is dropped (Santa crosses all linked displays).</summary>
+    public object? DropWorld;
+
+    /// <summary>Already handed over to the next display.</summary>
+    public bool Passed;
 }

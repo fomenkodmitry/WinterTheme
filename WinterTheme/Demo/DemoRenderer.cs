@@ -36,6 +36,7 @@ public static class DemoRenderer
         Building(dir);
         Fireworks(dir);
         Snowball(dir);
+        Linked(dir);
     }
 
     private static World NewWorld(bool withWindows = true)
@@ -198,6 +199,117 @@ public static class DemoRenderer
         Console.WriteLine($"snowball: gx={gx} dir={w.Grinch.Dir} grinch hit={w.Grinch.HitT < 1}, nose back={man.Man!.HasNose}");
 
         Save(w, Path.Combine(dir, "snowball.jpg"));
+    }
+
+    /// <summary>Two displays side by side: Santa and the tractor must cross from one to the other.</summary>
+    private static void Linked(string dir)
+    {
+        var a = new World(new Cocoa.ScreenInfo(0, new CGRect(0, 0, W, H), new CGRect(0, 0, W, H), MenuH, 0));
+        var b = new World(new Cocoa.ScreenInfo(1, new CGRect(W, 0, W, H), new CGRect(W, 0, W, H), MenuH, 0));
+        a.RightNeighbor = b;
+        b.LeftNeighbor = a;
+        foreach (var w in new[] { a, b })
+        {
+            w.UpdateWindows(new List<Quartz.WinInfo>());
+            for (int i = 0; i < w.Ground.N; i++) w.Ground.H[i] = 30 + 8 * MathF.Sin(i * 0.05f);
+        }
+
+        void Step() { a.Update(Dt); b.Update(Dt); }
+
+        // tractor: starts on the left display going right, must clean both
+        a.StartTractor();
+        a.Tractor.Dir = 1;
+        a.Tractor.X = -170;
+        bool bGotTractor = false;
+        for (int k = 0; k < 30 * 60 && (a.Tractor.Active || b.Tractor.Active); k++)
+        {
+            Step();
+            bGotTractor |= b.Tractor.Active;
+        }
+        Console.WriteLine($"linked tractor: reached B={bGotTractor}, A avg={a.Ground.Average:F1}, B avg={b.Ground.Average:F1}");
+
+        // santa: called on B, must start on A's far side and fly through both, one present in total
+        for (int tries = 0; tries < 20; tries++)
+        {
+            b.StartSanta();
+            Step();
+            if (a.Santa.Active && a.Santa.Dir > 0) break;
+            a.Santa.Active = b.Santa.Active = false;
+        }
+        bool saved = false;
+        bool aSeen = a.Santa.Active, bSeen = false;
+        for (int k = 0; k < 30 * 40 && (a.Santa.Active || b.Santa.Active); k++)
+        {
+            Step();
+            bSeen |= b.Santa.Active;
+            if (!saved && a.Santa.Active && b.Santa.Active && b.Santa.X > 60)
+            {
+                saved = true;
+                a.Bubbles.Clear();
+                b.Bubbles.Clear();
+                SaveWide(a, b, Path.Combine(dir, "two-displays.jpg"));
+                Console.WriteLine($"linked santa: A.X={a.Santa.X:F0} B.X={b.Santa.X:F0} (A.X - W = {a.Santa.X - W:F0})");
+            }
+        }
+        Console.WriteLine($"linked santa: on A={aSeen}, on B={bSeen}, presents A={a.Presents.Count} B={b.Presents.Count}");
+
+        // drag a whole snowman from A to B, then throw a snowball from A to B
+        a.Bubbles.Clear();
+        var root = new Ball { X = 1180, R = 40 };
+        root.Y = a.Ground.SurfaceY(root.X) - 34;
+        var mid = new Ball { X = 1180, R = 28, Below = root };
+        var head = new Ball { X = 1180, R = 20, Below = mid };
+        root.Above = mid;
+        mid.Above = head;
+        a.Balls.AddRange(new[] { root, mid, head });
+        a.MakeSnowman(root, hat: 1, scarf: 0xFFDC2626);
+        a.Held = root;
+        root.Held = true;
+        a.MouseDown = b.MouseDown = true;
+        for (float gx = 1180; gx < 1500; gx += 8)
+        {
+            a.Mx = gx; b.Mx = gx - W;
+            a.My = b.My = root.Y;
+            Step();
+        }
+        a.MouseDown = b.MouseDown = false;
+        Step();
+        Step();
+        Console.WriteLine($"linked drag: A balls={a.Balls.Count}, B balls={b.Balls.Count}, B snowman={b.Balls.Any(x => x.Man != null)}, B held={b.Held != null}, X={root.X:F0}");
+
+        var ball = new Ball { X = 1200, Y = 300, R = 10, Flying = true, VX = 700, VY = -100 };
+        a.Balls.Add(ball);
+        bool reachedB = false;
+        for (int k = 0; k < 60; k++)
+        {
+            Step();
+            reachedB |= b.Balls.Contains(ball);
+        }
+        Console.WriteLine($"linked throw: reached B={reachedB}, still flying={a.Balls.Contains(ball) || b.Balls.Contains(ball)}");
+    }
+
+    private static void SaveWide(World a, World b, string path)
+    {
+        var info = new SKImageInfo((int)(W * 2), (int)H, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using var surface = SKSurface.Create(info);
+        var c = surface.Canvas;
+        foreach (var (w, x) in new[] { (a, 0f), (b, W) })
+        {
+            c.Save();
+            c.Translate(x, 0);
+            c.ClipRect(new SKRect(0, 0, W, H));
+            DrawDesktop(c);
+            c.SaveLayer();
+            new Painter().Draw(c, w);
+            c.Restore();
+            c.Restore();
+        }
+        using var p = new SKPaint { Color = new SKColor(10, 10, 14), StrokeWidth = 6 };
+        c.DrawLine(W, 0, W, H, p);
+        using var img = surface.Snapshot();
+        using var data = img.Encode(SKEncodedImageFormat.Jpeg, 88);
+        File.WriteAllBytes(path, data.ToArray());
+        Console.WriteLine($"wrote {path}");
     }
 
     // ------------------------------------------------------------------ output

@@ -59,7 +59,39 @@ public sealed class App : Application
             _overlays.Add(w);
             w.Show();
         }
+        LinkWorlds();
         PollWindows();
+    }
+
+    /// <summary>Finds displays that touch side by side, so Santa, the tractor and the Grinch can cross between them.</summary>
+    private void LinkWorlds()
+    {
+        var ws = Worlds.ToList();
+        foreach (var a in ws)
+        {
+            a.LeftNeighbor = Touching(a, ws, -1);
+            a.RightNeighbor = Touching(a, ws, 1);
+        }
+    }
+
+    private static World? Touching(World a, List<World> ws, int dir)
+    {
+        var r = a.Screen.Cg;
+        World? best = null;
+        double bestOverlap = 0;
+        foreach (var b in ws)
+        {
+            if (b == a) continue;
+            var q = b.Screen.Cg;
+            bool touch = dir > 0 ? Math.Abs(q.X - (r.X + r.W)) < 4 : Math.Abs(q.X + q.W - r.X) < 4;
+            double overlap = Math.Min(r.Y + r.H, q.Y + q.H) - Math.Max(r.Y, q.Y);
+            if (touch && overlap > bestOverlap)
+            {
+                best = b;
+                bestOverlap = overlap;
+            }
+        }
+        return best;
     }
 
     private void CheckScreens()

@@ -36,6 +36,7 @@ public static class Tray
         menu.Items.Add(Toggle("Гирлянда", () => s.Garland, v => s.Garland = v));
         menu.Items.Add(Toggle("Курсор раздвигает сугробы", () => s.CursorPush, v => s.CursorPush = v));
         menu.Items.Add(Toggle("Таяние", () => s.Melt, v => s.Melt = v));
+        menu.Items.Add(Toggle("Мониторы как один экран", () => s.LinkScreens, v => s.LinkScreens = v));
 
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(Action("Вызвать трактор", () => app.OnActiveWorld(w => w.StartTractor())));
