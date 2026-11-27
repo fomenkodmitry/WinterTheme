@@ -3,7 +3,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/fomenkodmitry/WinterTheme/main/install.sh | bash
 set -euo pipefail
 
-VERSION="1.0.1"
+VERSION="1.1.0"
 URL="https://github.com/fomenkodmitry/WinterTheme/raw/main/release/WinterTheme-$VERSION-arm64.dmg"
 
 if [[ "$(uname -m)" != "arm64" ]]; then

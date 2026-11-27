@@ -40,6 +40,12 @@ public sealed class World
     private float _tractorCheck = 5, _nextGrinch, _nextSanta;
     private bool _initialFill = true;
 
+    private float _nextChat = 35, _nextStar = 45, _flurryT;
+    private float _showT, _showNext;
+    private float _countdown = -1, _clockCheck;
+    private int _lastCount, _countdownYear, _celebratedYear;
+    private float _throwVX, _throwVY;
+
     private static readonly Settings S = Settings.Current;
     private const float MaxBallR = 76;
 
@@ -87,6 +93,8 @@ public sealed class World
         UpdateGrinch(dt);
         UpdateSanta(dt);
         UpdateEvents(dt);
+        UpdateShow(dt);
+        UpdateClock(dt);
 
         for (int i = Bubbles.Count - 1; i >= 0; i--)
         {
@@ -115,7 +123,7 @@ public sealed class World
 
     // ------------------------------------------------------------------ flakes
 
-    private int TargetFlakes => S.Paused ? 0 : (int)(320 * S.FlakeFactor * (W * H) / (1512f * 982f));
+    private int TargetFlakes => S.Paused ? 0 : (int)(320 * S.FlakeFactor * (_flurryT > 0 ? 3 : 1) * (W * H) / (1512f * 982f));
 
     private void Respawn(Flake f, bool anywhere)
     {
@@ -301,6 +309,22 @@ public sealed class World
                     p.VY = Math.Min(p.VY, 90);
                     p.Rot += dt * 8;
                     break;
+                case PKind.Rocket:
+                    p.VY += 450 * dt;
+                    p.VX *= 1 - 0.3f * dt;
+                    if (Rng.NextDouble() < 0.8)
+                        Spawn(PKind.Sparkle, p.X, p.Y, Rand(-15, 15), Rand(10, 40), Rand(0.8f, 1.5f), Rand(0.25f, 0.5f), new SKColor(255, 220, 150));
+                    if (p.VY > -30 || dead)
+                    {
+                        Burst(p.X, p.Y, p.Color);
+                        dead = true;
+                    }
+                    break;
+                case PKind.Star:
+                    if (Rng.NextDouble() < 0.6)
+                        Spawn(PKind.Sparkle, p.X, p.Y, p.VX * 0.05f + Rand(-10, 10), p.VY * 0.05f + Rand(-10, 10),
+                            Rand(0.8f, 1.6f), Rand(0.3f, 0.7f), new SKColor(220, 235, 255));
+                    break;
             }
 
             p.X += p.VX * dt;
@@ -465,7 +489,8 @@ public sealed class World
 
         var hover = MouseInside ? HitBall(Mx, My, 5) : null;
         var hoverPresent = MouseInside ? HitPresent(Mx, My) : null;
-        HoverBall = hover != null || hoverPresent != null;
+        bool hoverSanta = MouseInside && HitSanta(Mx, My);
+        HoverBall = hover != null || hoverPresent != null || hoverSanta;
 
         bool interactiveBefore = HoverInteractive;
         HoverInteractive = Held != null ||
@@ -473,7 +498,7 @@ public sealed class World
 
         // only react to presses that our (interactive) window actually swallowed
         if (pressed && interactiveBefore && MouseInside && Held == null)
-            OnPress(hover, hoverPresent);
+            OnPress(hover, hoverPresent, hoverSanta);
 
         if (Held != null)
         {
@@ -494,13 +519,21 @@ public sealed class World
         }
     }
 
-    private void OnPress(Ball? hover, Present? present)
+    private void OnPress(Ball? hover, Present? present, bool santa)
     {
         if (present != null)
         {
             OpenPresent(present);
             return;
         }
+
+        if (santa && hover == null)
+        {
+            SantaGift();
+            return;
+        }
+
+        _throwVX = _throwVY = 0;
 
         if (hover != null)
         {
@@ -529,6 +562,7 @@ public sealed class World
 
             Held = grab;
             grab.Held = true;
+            grab.Flying = false;
             _holdOffX = grab.X - Mx;
             _holdOffY = grab.Y - My;
             return;
@@ -556,6 +590,11 @@ public sealed class World
     private void DragHeld(float dt)
     {
         var b = Held!;
+        // smoothed hand velocity, used when the ball is let go (a flick throws it)
+        float k = Math.Min(1, dt * 14);
+        _throwVX += ((Mx - _pmx) / Math.Max(dt, 0.001f) - _throwVX) * k;
+        _throwVY += ((My - _pmy) / Math.Max(dt, 0.001f) - _throwVY) * k;
+
         float nx = Math.Clamp(Mx + _holdOffX, b.R, W - b.R);
         float ny = My + _holdOffY;
 
@@ -601,7 +640,7 @@ public sealed class World
         Ball? target = null;
         foreach (var t in Balls)
         {
-            if (t == b || t.Above != null || t.StackCount >= 3) continue;
+            if (t == b || t.Flying || t.Above != null || t.StackCount >= 3) continue;
             if (MathF.Abs(b.X - t.X) < t.R * 0.9f && b.Y < t.Y && b.R <= t.R * 1.1f)
                 if (target == null || t.Y < target.Y) target = t;
         }
@@ -612,6 +651,18 @@ public sealed class World
             target.Above = b;
             Powder(b.X, b.Y + b.R, 5, 50, 40);
             if (b.StackCount == 3) MakeSnowman(b.Root);
+            return;
+        }
+
+        // flicked: it becomes a snowball
+        float sp = MathF.Sqrt(_throwVX * _throwVX + _throwVY * _throwVY);
+        bool lifted = b.Y < Ground.SurfaceY(b.X) - b.R * 0.85f - 4 || _throwVY < -200;
+        if (sp > 450 && lifted && b.R <= 34)
+        {
+            float m = Math.Min(1, 1600 / sp);
+            b.Flying = true;
+            b.VX = _throwVX * m;
+            b.VY = _throwVY * m;
         }
     }
 
@@ -620,9 +671,13 @@ public sealed class World
         new(220, 38, 38), new(37, 99, 235), new(22, 163, 74), new(234, 179, 8), new(147, 51, 234), new(236, 72, 153),
     };
 
-    private static readonly string[] Hellos = { "Привет!", "Ура, я живой!", "Холодно!", "С Новым годом!", "Где мой нос?.. А, вот." };
+    private static readonly string[] Hellos =
+    {
+        "Привет!", "Ура, я живой!", "Холодно!", "С Новым годом!", "Где мой нос?.. А, вот.", "Я родился!", "Мама?",
+        "Какой я красивый!", "Спасибо, что слепил!", "Я тут постою, ладно?", "Морковка на месте. Начинаем!",
+    };
 
-    public void MakeSnowman(Ball root, int hat = -1, uint scarf = 0, bool nose = true)
+    public void MakeSnowman(Ball root, int hat = -1, uint scarf = 0, bool nose = true, string? hello = null)
     {
         root.Man = new Snowman
         {
@@ -637,7 +692,7 @@ public sealed class World
         if (hat >= 0) return;
         var head = root.Top;
         Sparkles(head.X, head.Y, 30, 120);
-        Say(Hellos[Rng.Next(Hellos.Length)], () => new SKPoint(head.X, head.Y - head.R * 2.3f), 3);
+        Say(hello ?? Pick(Hellos), () => new SKPoint(head.X, head.Y - head.R * 2.3f), 3);
     }
 
     private void Push(Pile p, float vx)
@@ -676,9 +731,13 @@ public sealed class World
 
     private void UpdateBalls(float dt)
     {
+        for (int i = Balls.Count - 1; i >= 0; i--)
+            if (Balls[i].Flying && Fly(Balls[i], dt))
+                Balls.RemoveAt(i);
+
         foreach (var b in Balls)
         {
-            if (b.Below != null || b.Held) continue;
+            if (b.Below != null || b.Held || b.Flying) continue;
             float target = Ground.SurfaceY(b.X) - b.R * 0.85f;
             if (b.Y < target - 0.5f)
             {
@@ -734,15 +793,112 @@ public sealed class World
     private static readonly string[] PresentLines =
     {
         "Хо-хо-хо!", "Мандаринка!", "Носки! Тёплые!", "С Новым годом!", "Код без багов!", "Отпуск в январе!", "Ещё кофе!",
+        "Прод не упадёт до 9 января!", "Зарплата x2!", "Тазик оливье!", "Шоколадный Дед Мороз!", "Мерж без конфликтов!",
+        "Зелёный CI с первого раза!", "Свитер с оленями!", "Сон до обеда!", "Пятница каждый день!", "Мандарины без косточек!",
+        "Новый MacBook! ...шучу, носки", "Счастья, здоровья, аптайма!", "Релиз без хотфиксов!", "Ноль митингов в январе!",
+        "Ёлочная игрушка!", "Бенгальский огонь!", "Варежки!", "Шапка-ушанка!", "Валенки!", "Коробка. Просто коробка",
+        "Внутри ещё одна коробка...", "Пустота. Зато красиво", "Гирлянда, которая не путается!", "Икра! Красная!",
+        "Холодец!", "Селёдка под шубой!", "Ирония судьбы по ТВ!", "Новогоднее чудо!", "Желание сбудется!",
+        "Удача на весь год!", "Отпуск без рабочего чата!", "Пароль от вайфая Деда Мороза", "Код-ревью: LGTM",
+        "Все тикеты закрыты!", "Тимлид в отпуске!", "Кофе бесплатно весь год!", "+100 к карме!", "Тёплый плед!",
+        "Какао с маршмеллоу!", "Пряник!", "Леденец!", "Мишура!", "Календарь с котиками!", "Год без дедлайнов!",
+        "Годовая премия!", "Сюрприз! Это ты!", "Билет на море!", "Ноутбук не тормозит!", "Батарея на весь день!",
+        "Наушники, которые не путаются", "Вечный пробник мандарина", "Прощение за TODO в коде", "Тесты сами написались!",
+        "Продакшн-доступ... нет, тебе рано", "Мандарин с секретом!", "Хорошее настроение!", "Объятия от снеговика!",
+        "Снежинка ручной работы", "Ты молодец в этом году!", "Оливье, проверенное временем", "Время на хобби!",
+        "Пульт от телевизора! Наконец-то", "Котёнок! ...нет, это шарф", "Год без багов! ...почти",
     };
+
+    private static readonly string[] CoalLines =
+    {
+        "Уголёк. Ты плохо себя вёл в этом году", "Уголь. Зато экологичный", "Уголёк. За пятничные деплои",
+        "Уголёк. За TODO в коде", "Уголёк. За force push в main", "Уголёк. Подумай о своём поведении",
+    };
+
+    private static readonly string[] FireworkLines = { "Салют!", "Бабах!", "Праздничный салют!", "Ой, оно взрывается!" };
 
     private void OpenPresent(Present p)
     {
         Presents.Remove(p);
-        Confetti(p.X, p.Y, 50);
-        Sparkles(p.X, p.Y, 16, 90);
         float x = p.X, y = p.Y;
-        Say(PresentLines[Rng.Next(PresentLines.Length)], () => new SKPoint(x, y - 40), 2.5f);
+        SKPoint At() => new(x, y - 40);
+        double r = Rng.NextDouble();
+
+        if (r < 0.10)
+        {
+            for (int i = 0; i < 9; i++)
+                Spawn(PKind.Smoke, x + Rand(-6, 6), y, Rand(-20, 20), Rand(-50, -20), Rand(3, 6), Rand(1, 2), new SKColor(60, 60, 66));
+            Say(Pick(CoalLines), At, 3);
+            return;
+        }
+
+        Confetti(x, y, 50);
+        Sparkles(x, y, 16, 90);
+
+        if (r < 0.22)
+        {
+            for (int i = 0; i < 3; i++) LaunchRocket(x + Rand(-30, 30), y);
+            Say(Pick(FireworkLines), At, 2.5f);
+        }
+        else if (r < 0.31)
+        {
+            SnowmanFromBox(x);
+        }
+        else if (r < 0.39)
+        {
+            for (int i = 0; i < Ground.N; i++)
+            {
+                float d = MathF.Abs(Ground.BinCenter(i) - x) / 55;
+                if (d < 1) Ground.AddBin(i, 30 * (1 - d * d));
+            }
+            Powder(x, y, 20, 90, 120);
+            Say("Личный сугроб!", At, 2.5f);
+        }
+        else if (r < 0.45 && !Grinch.Active)
+        {
+            var g = Grinch;
+            g.Active = true;
+            g.State = GrinchState.Escape;
+            g.StateT = 0;
+            g.X = x;
+            g.Dir = x < W / 2 ? -1 : 1;
+            g.HasPresent = true;
+            g.PresentColor = p.Box;
+            g.HasCarrot = false;
+            g.Target = null;
+            g.Victim = null;
+            g.HitT = 99;
+            Say("Сюрприз! Хе-хе!", GrinchAnchor, 2f);
+            React(GrinchAlert, 0.8f);
+        }
+        else if (r < 0.52)
+        {
+            _flurryT = 20;
+            Say("Метель в подарок!", At, 2.5f);
+        }
+        else if (r < 0.55 && !Tractor.Active)
+        {
+            StartTractor();
+        }
+        else
+        {
+            Say(Pick(PresentLines), At, 2.8f);
+        }
+    }
+
+    private void SnowmanFromBox(float x)
+    {
+        x = Math.Clamp(x, 30, W - 30);
+        Ball? below = null, root = null;
+        foreach (var r in new[] { 22f, 16f, 11f })
+        {
+            var b = new Ball { X = x, R = r, Y = Ground.SurfaceY(x) - r, Below = below };
+            if (below != null) below.Above = b;
+            root ??= b;
+            below = b;
+            Balls.Add(b);
+        }
+        MakeSnowman(root!, hello: "Я был в коробке!");
     }
 
     private void UpdatePresents(float dt)
@@ -786,7 +942,13 @@ public sealed class World
         Tractor.Load = 0;
         Tractor.T = 0;
         Say("Бип-бип! Чищу!", () => new SKPoint(Math.Clamp(Tractor.X, 60, W - 60), H - 135), 2.5f);
+        React(TractorAlert, 0.5f, Tractor.Dir > 0 ? 0 : W);
     }
+
+    private static readonly string[] TractorAlert =
+    {
+        "Трактор! Только не меня!", "Осторожно, я живой!", "Бип-бип и тебе", "Жаль, у меня нет ног", "Аккуратнее там!",
+    };
 
     private void UpdateTractor(float dt)
     {
@@ -831,7 +993,7 @@ public sealed class World
         float front = blade + t.Dir * t.PileH * 0.9f;
         foreach (var ball in Balls)
         {
-            if (ball.Below != null || ball.Above != null || ball.Held || ball.R > 30) continue;
+            if (ball.Below != null || ball.Above != null || ball.Held || ball.Flying || ball.R > 30) continue;
             bool ahead = t.Dir > 0 ? ball.X > t.X && ball.X - ball.R < front : ball.X < t.X && ball.X + ball.R > front;
             if (ahead) ball.X = front + t.Dir * ball.R;
         }
@@ -862,7 +1024,24 @@ public sealed class World
 
     // ------------------------------------------------------------------ grinch
 
-    private static readonly string[] GrinchLines = { "Хе-хе-хе!", "Это теперь моё!", "Ненавижу праздники!", "Морковка!" };
+    private static readonly string[] GrinchLines =
+    {
+        "Хе-хе-хе!", "Это теперь моё!", "Ненавижу праздники!", "Морковка!", "Ничего личного!", "Отменяю Новый год!",
+        "Буду есть с хрустом!", "Праздник отменяется!", "Мне нужнее!",
+    };
+
+    private static readonly string[] GrinchAlert =
+    {
+        "Гринч! Кидай в него снежок!", "Держите подарки!", "Опять он!", "Гринч! Швырни ком в него!", "Спасите мою морковку!",
+    };
+
+    private static readonly string[] GrinchOuch =
+    {
+        "Ай!", "Нечестно!", "Мой мех!", "Ладно-ладно, ухожу!", "Я ещё вернусь!", "Холодно же!", "Снег за шиворот!",
+    };
+
+    private SKPoint GrinchAnchor() => new(Grinch.X, Ground.SurfaceY(Grinch.X) - 110);
+
 
     public void StartGrinch()
     {
@@ -873,6 +1052,8 @@ public sealed class World
         g.HasCarrot = false;
         g.HasPresent = false;
         g.Target = null;
+        g.Victim = null;
+        g.HitT = 99;
 
         object? target = Presents.Where(p => p.Landed).OrderBy(_ => Rng.Next()).FirstOrDefault();
         target ??= Balls.Where(b => b.Below == null && b.Man is { HasNose: true }).OrderBy(_ => Rng.Next()).FirstOrDefault();
@@ -882,6 +1063,7 @@ public sealed class World
         g.Dir = tx > W / 2 ? 1 : -1;
         if (target == null) g.Dir = Rng.Next(2) == 0 ? 1 : -1;
         g.X = g.Dir > 0 ? -60 : W + 60;
+        React(GrinchAlert, 0.75f);
     }
 
     private void UpdateGrinch(float dt)
@@ -889,6 +1071,7 @@ public sealed class World
         var g = Grinch;
         if (!g.Active) return;
         g.StateT += dt;
+        g.HitT += dt;
 
         switch (g.State)
         {
@@ -933,11 +1116,12 @@ public sealed class World
                         man.HasNose = false;
                         man.NoseLostAt = Time;
                         g.HasCarrot = true;
+                        g.Victim = man;
                         var head = b.Top;
                         Say("Эй! Мой нос!", () => new SKPoint(head.X, head.Y - head.R * 2.3f), 2.5f);
                     }
                     g.Target = null;
-                    Say(GrinchLines[Rng.Next(GrinchLines.Length)], () => new SKPoint(Grinch.X, Ground.SurfaceY(Grinch.X) - 110), 2f);
+                    Say(Pick(GrinchLines), GrinchAnchor, 2f);
                 }
                 if (g.StateT > 1.3f)
                 {
@@ -977,6 +1161,52 @@ public sealed class World
         s.T = 0;
         s.Dropped = false;
         s.DropX = Rand(W * 0.15f, W * 0.85f);
+        s.Extra = 0;
+        s.ClickCd = 0;
+        React(SantaAlert, 0.6f);
+    }
+
+    private static readonly string[] SantaAlert =
+    {
+        "Санта!!!", "Я хорошо себя вёл!", "Хо-хо-хо! ...я тренируюсь", "Санта, кликни мне подарок!", "Дед Мороз! То есть Санта!",
+    };
+
+    private static readonly string[] SantaClick =
+    {
+        "Хо-хо! Держи ещё!", "Лови!", "Для хорошего человека не жалко!", "Последний! ...наверное", "Хо-хо-хо!",
+    };
+
+    private bool HitSanta(float x, float y)
+    {
+        var s = Santa;
+        if (!s.Active) return false;
+        float lx = (x - s.X) / (s.Dir * 0.9f), ly = (y - s.Y) / 0.9f;
+        return lx > -42 && lx < 190 && ly > -64 && ly < 6;
+    }
+
+    private void SantaGift()
+    {
+        var s = Santa;
+        if (s.ClickCd > 0) return;
+        s.ClickCd = 0.8f;
+        float sx = s.X, sy = s.Y;
+        if (s.Extra >= 3 || Presents.Count >= 8)
+        {
+            s.ClickCd = 3;
+            Say("Хо-хо! Хватит на сегодня!", () => new SKPoint(sx, sy - 40), 2f);
+            return;
+        }
+        s.Extra++;
+        DropPresent(s.X - s.Dir * 20, s.Y, s.Dir * 60);
+        Sparkles(s.X, s.Y - 20, 14, 70);
+        Say(Pick(SantaClick), () => new SKPoint(sx, sy - 40), 2f);
+    }
+
+    private void DropPresent(float x, float y, float vx)
+    {
+        var c = BoxColors[Rng.Next(BoxColors.Length)];
+        var rib = BoxColors[(Array.IndexOf(BoxColors, c) + 2) % BoxColors.Length];
+        Presents.Add(new Present { X = x, Y = y, VX = vx, VY = -40, Size = Rand(18, 26), Box = c, Ribbon = rib == c ? SKColors.Gold : rib });
     }
 
     private static readonly SKColor[] BoxColors =
@@ -989,6 +1219,7 @@ public sealed class World
         var s = Santa;
         if (!s.Active) return;
         s.T += dt;
+        s.ClickCd -= dt;
         s.X += s.Dir * 150 * dt;
         s.Y = s.Y0 + MathF.Sin(s.T * 1.3f) * 16;
 
@@ -1005,9 +1236,7 @@ public sealed class World
             s.Dropped = true;
             if (Presents.Count < 6)
             {
-                var c = BoxColors[Rng.Next(BoxColors.Length)];
-                var rib = BoxColors[(Array.IndexOf(BoxColors, c) + 2) % BoxColors.Length];
-                Presents.Add(new Present { X = s.X - s.Dir * 20, Y = s.Y, VX = s.Dir * 60, VY = -40, Size = Rand(18, 26), Box = c, Ribbon = rib == c ? SKColors.Gold : rib });
+                DropPresent(s.X - s.Dir * 20, s.Y, s.Dir * 60);
                 float sx = s.X, sy = s.Y;
                 Say("Хо-хо-хо!", () => new SKPoint(sx, sy - 40), 2f);
             }
@@ -1046,10 +1275,320 @@ public sealed class World
                 StartSanta();
             }
         }
+
+        _flurryT -= dt;
+
+        if (S.Chatter)
+        {
+            _nextChat -= dt;
+            if (_nextChat <= 0)
+            {
+                _nextChat = Rand(30, 80);
+                Chat();
+            }
+        }
+
+        if (S.ShootingStars)
+        {
+            _nextStar -= dt;
+            if (_nextStar <= 0)
+            {
+                int hour = DateTime.Now.Hour;
+                _nextStar = hour >= 17 || hour < 7 ? Rand(35, 110) : Rand(120, 300);
+                ShootingStar();
+            }
+        }
     }
 
-    public void Say(string text, Func<SKPoint> anchor, float life = 2.5f)
+    // ------------------------------------------------------------------ snowballs
+
+    private static readonly string[] OuchLines = { "Ай!", "Эй, за что?", "Снежная война?!", "Нечестно!", "Хи-хи, щекотно", "Мимо! ...ой, нет" };
+    private static readonly string[] CheerLines = { "Попал!", "Так его!", "Меткий!", "В яблочко!", "Ура!" };
+
+    /// <summary>Moves a thrown snowball; returns true when it splatted or left the screen.</summary>
+    private bool Fly(Ball b, float dt)
     {
-        Bubbles.Add(new Bubble { Text = text, Anchor = anchor, Life = life });
+        float py = b.Y;
+        b.VY += 900 * dt;
+        b.X += b.VX * dt;
+        b.Y += b.VY * dt;
+        b.Angle += b.VX * dt / b.R;
+        if (b.X < -80 || b.X > W + 80 || b.Y > H + 80) return true;
+
+        var g = Grinch;
+        if (g.Active)
+        {
+            float feet = Ground.SurfaceY(g.X);
+            if (MathF.Abs(b.X - g.X) < 20 + b.R && b.Y > feet - 100 - b.R && b.Y < feet + b.R)
+            {
+                HitGrinch();
+                Splat(b);
+                return true;
+            }
+        }
+
+        foreach (var t in Balls)
+        {
+            if (t == b || t.Flying || t.Held) continue;
+            float dx = b.X - t.X, dy = b.Y - t.Y, rr = b.R + t.R * 0.95f;
+            if (dx * dx + dy * dy >= rr * rr) continue;
+            var root = t.Root;
+            if (root.Man != null) SayMan(root, Pick(OuchLines));
+            else if (t.Above == null && t.Below == null && t.R < 30) t.X = Math.Clamp(t.X + MathF.Sign(b.VX) * 10, t.R, W - t.R);
+            Splat(b);
+            return true;
+        }
+
+        if (b.VY > 0 && S.SnowOnWindows)
+        {
+            foreach (var p in PileOrder)
+            {
+                if (!p.Contains(b.X) || !p.VisibleAt(b.X)) continue;
+                float s = p.SurfaceY(b.X);
+                if (py + b.R * 0.5f <= s && b.Y + b.R * 0.5f >= s)
+                {
+                    Splat(b);
+                    return true;
+                }
+            }
+        }
+
+        if (b.Y + b.R * 0.6f >= Ground.SurfaceY(b.X))
+        {
+            Splat(b);
+            return true;
+        }
+        return false;
     }
+
+    /// <summary>Breaks a snowball into clumps that settle wherever they land, so the snow is not lost.</summary>
+    private void Splat(Ball b)
+    {
+        float total = b.R * b.R * MathF.PI / (Ground.BinW * 2.2f);
+        int n = Math.Clamp((int)(total / 12), 4, 24);
+        for (int i = 0; i < n; i++)
+            Clump(b.X + Rand(-b.R, b.R) * 0.5f, b.Y + Rand(-b.R, b.R) * 0.5f, total / n, b.VX * 0.15f + Rand(-90, 90), Rand(-180, -40));
+        Powder(b.X, b.Y, 10, 90, 90);
+    }
+
+    private void HitGrinch()
+    {
+        var g = Grinch;
+        g.HitT = 0;
+        float feet = Ground.SurfaceY(g.X);
+        Powder(g.X, feet - 70, 14, 90, 90);
+
+        if (g.HasPresent)
+        {
+            g.HasPresent = false;
+            Presents.Add(new Present { X = g.X, Y = feet - 60, VX = -g.Dir * 80, VY = -260, Size = 22, Box = g.PresentColor, Ribbon = SKColors.Gold });
+        }
+        if (g.HasCarrot)
+        {
+            g.HasCarrot = false;
+            var root = Balls.FirstOrDefault(x => x.Man == g.Victim);
+            if (root?.Man != null)
+            {
+                root.Man.HasNose = true;
+                var head = root.Top;
+                Sparkles(head.X + head.R * 0.4f, head.Y, 14, 60);
+                SayMan(root, "Мой нос! Спасибо!");
+            }
+        }
+        g.Victim = null;
+        g.Target = null;
+
+        Say(Pick(GrinchOuch), GrinchAnchor, 2f);
+        React(CheerLines, 0.5f);
+        if (g.State != GrinchState.Escape)
+        {
+            g.State = GrinchState.Escape;
+            g.StateT = 0;
+            g.Dir = g.X < W / 2 ? -1 : 1;
+        }
+    }
+
+    // ------------------------------------------------------------------ fireworks, stars, new year
+
+    private static readonly SKColor[] FireColors =
+    {
+        new(255, 80, 80), new(255, 210, 70), new(90, 230, 120), new(90, 170, 255), new(255, 120, 220), new(180, 120, 255),
+    };
+
+    public void LaunchRocket(float x, float fromY)
+    {
+        float apex = Rand(MenuBarH + 60, H * 0.45f);
+        float v = MathF.Sqrt(2 * 450 * Math.Max(80, fromY - apex));
+        Spawn(PKind.Rocket, x, fromY, Rand(-25, 25), -v, 2, 6, FireColors[Rng.Next(FireColors.Length)]);
+    }
+
+    public void Burst(float x, float y, SKColor col)
+    {
+        var col2 = Rng.Next(3) == 0 ? SKColors.White : FireColors[Rng.Next(FireColors.Length)];
+        const int n = 72;
+        for (int i = 0; i < n; i++)
+        {
+            float a = i * MathF.Tau / n + Rand(-0.05f, 0.05f), sp = Rand(120, 200);
+            Spawn(PKind.Sparkle, x, y, MathF.Cos(a) * sp, MathF.Sin(a) * sp, Rand(2f, 3.2f), Rand(1.3f, 2.2f), i % 4 == 0 ? col2 : col);
+        }
+        Sparkles(x, y, 10, 40);
+    }
+
+    private static readonly string[] FireworkCheer = { "Уууух!", "Красота!", "Салют!", "Ещё!", "Вау!" };
+
+    public void StartFireworks(float seconds)
+    {
+        _showT = Math.Max(_showT, seconds);
+        _showNext = 0;
+        React(FireworkCheer, 0.7f);
+    }
+
+    private void UpdateShow(float dt)
+    {
+        if (_showT <= 0) return;
+        _showT -= dt;
+        _showNext -= dt;
+        if (_showNext > 0) return;
+        _showNext = Rand(0.25f, 0.8f);
+        int count = Rng.Next(4) == 0 ? 2 : 1;
+        for (int i = 0; i < count; i++)
+        {
+            float x = Rand(W * 0.08f, W * 0.92f);
+            LaunchRocket(x, Ground.SurfaceY(x));
+        }
+    }
+
+    private static readonly string[] StarLines = { "Звезда! Загадай желание!", "Видел? Звезда упала!", "Я загадал морковку" };
+
+    public void ShootingStar()
+    {
+        int dir = Rng.Next(2) == 0 ? 1 : -1;
+        float x = dir > 0 ? Rand(-50, W * 0.5f) : Rand(W * 0.5f, W + 50);
+        float y = MenuBarH + Rand(10, H * 0.25f);
+        float sp = Rand(500, 800), a = Rand(0.25f, 0.5f);
+        Spawn(PKind.Star, x, y, dir * MathF.Cos(a) * sp, MathF.Sin(a) * sp, 1.6f, Rand(0.9f, 1.5f), SKColors.White);
+        React(StarLines, 0.35f);
+    }
+
+    /// <summary>Runs a 10-second countdown and the midnight show right now (for trying it out).</summary>
+    public void RehearseNewYear()
+    {
+        _countdown = 10;
+        _lastCount = 99;
+        _countdownYear = 0;
+    }
+
+    private void UpdateClock(float dt)
+    {
+        if (_countdown >= 0)
+        {
+            _countdown -= dt;
+            int k = (int)MathF.Ceiling(_countdown);
+            if (k != _lastCount && k > 0)
+            {
+                _lastCount = k;
+                Say(k.ToString(), () => new SKPoint(W / 2, H * 0.32f), 0.95f, 3);
+            }
+            if (_countdown <= 0)
+            {
+                _countdown = -1;
+                Celebrate(_countdownYear);
+            }
+            return;
+        }
+
+        _clockCheck -= dt;
+        if (_clockCheck > 0 || !S.NewYearShow) return;
+        _clockCheck = 0.5f;
+        var now = DateTime.Now;
+        if (now is { Month: 12, Day: 31, Hour: 23, Minute: 59, Second: >= 50 } && _celebratedYear != now.Year + 1)
+        {
+            _countdown = 60 - now.Second - now.Millisecond / 1000f;
+            _lastCount = 99;
+            _countdownYear = now.Year + 1;
+        }
+        else if (now is { Month: 1, Day: 1, Hour: 0, Minute: < 2 } && _celebratedYear != now.Year)
+        {
+            Celebrate(now.Year);
+        }
+    }
+
+    private static readonly string[] NewYearLines = { "С Новым годом!", "Ура-а-а!", "С новым счастьем!", "Загадал!", "Чокаемся!" };
+
+    private void Celebrate(int year)
+    {
+        if (year > 0) _celebratedYear = year;
+        Say(year > 0 ? $"С Новым {year} годом!" : "С Новым годом!", () => new SKPoint(W / 2, H * 0.32f), 6, 2.2f);
+        for (int k = 0; k < 6; k++) Confetti(W * (k + 0.5f) / 6, MenuBarH + 10, 40);
+        StartFireworks(40);
+        foreach (var root in Snowmen().ToList()) SayMan(root, Pick(NewYearLines), 4);
+        StartSanta();
+    }
+
+    // ------------------------------------------------------------------ snowmen talk
+
+    private IEnumerable<Ball> Snowmen() => Balls.Where(b => b.Below == null && b.Man != null && !b.Held);
+
+    private void SayMan(Ball root, string text, float life = 2.5f)
+    {
+        var head = root.Top;
+        Say(text, () => new SKPoint(head.X, head.Y - head.R * 2.3f), life);
+    }
+
+    /// <summary>A snowman (the one nearest to <paramref name="nearX"/>, or a random one) comments on an event.</summary>
+    private void React(string[] lines, float chance, float? nearX = null)
+    {
+        if (Rng.NextDouble() > chance) return;
+        var men = Snowmen().ToList();
+        if (men.Count == 0) return;
+        var man = nearX is { } nx ? men.OrderBy(b => MathF.Abs(b.X - nx)).First() : men[Rng.Next(men.Count)];
+        SayMan(man, Pick(lines));
+    }
+
+    private static readonly string[] ChatLines =
+    {
+        "Холодно-то как!", "Хочу на море. Хотя нет, растаю", "Мне бы шарф потеплее", "Скоро Новый год!",
+        "Ты работаешь или на снег смотришь?", "Ещё снега!", "Морковка чешется", "Летом меня не будет. Цени момент",
+        "Стою. Это моё кардио", "Слепи мне друга!", "Жду Санту", "Хорошо стоим", "Не забудь сохранить файл!",
+        "Перерыв! Попей чаю", "Я не толстый, я из трёх комов", "Снег — это вода в отпуске", "Мечтаю о холодильнике",
+        "Где мои ноги?", "Чую Гринча...", "Хо-хо... ой, это не моя реплика", "Сосулька — снег с характером",
+        "Красивые у тебя окна", "Помаши мне курсором!", "Если что, я за тобой не слежу", "Мандаринку бы...",
+        "Кто-нибудь видел трактор?", "Подарки открывать будешь?", "Скинь в меня снежок. Шучу. Не надо",
+        "Подожди, я позирую", "Ты сегодня продуктивный!", "Зима — лучшее время года", "Пойду погуляю. А, точно",
+    };
+
+    private void Chat()
+    {
+        if (Bubbles.Count > 1) return;
+        var men = Snowmen().ToList();
+        if (men.Count == 0) return;
+        var man = men[Rng.Next(men.Count)];
+        var now = DateTime.Now;
+
+        var pool = new List<string>(ChatLines);
+        if (!man.Man!.HasNose) pool.AddRange(new[] { "Кто видел мой нос?", "Без морковки как без рук", "Гринч, верни нос!" });
+        if (now.Hour < 5) pool.AddRange(new[] { "Не спится?", "Иди спать, код подождёт", "Тсс, снег спит", "Уже ночь, а ты всё тут" });
+        if (now is { Month: 12, Day: 31 }) pool.AddRange(new[] { "Сегодня оливье!", "Куранты скоро!", "Желание уже придумал?", "Последний день года!" });
+        if (now is { Month: 1, Day: <= 2 }) pool.AddRange(new[] { "С Новым годом! Голова не болит?", "Оливье ещё осталось?", "Как отметил?" });
+        if (now.Month == 12 && now.Day < 31) pool.Add($"До Нового года {31 - now.Day + 1} дн.");
+        if (men.Count == 1) pool.AddRange(new[] { "Одиноко мне тут...", "Слепи мне компанию!" });
+        if (men.Count >= 3) pool.AddRange(new[] { "Нас тут целая банда!", "Снеговики, стройся!" });
+        if (Presents.Count > 0) pool.Add("Там подарок! Кликни!");
+
+        SayMan(man, Pick(pool.ToArray()), 3);
+    }
+
+    public void Say(string text, Func<SKPoint> anchor, float life = 2.5f, float scale = 1)
+    {
+        // one speaker, one bubble: drop whatever is already said at the same spot
+        var at = anchor();
+        Bubbles.RemoveAll(b =>
+        {
+            var o = b.Anchor();
+            return MathF.Abs(o.X - at.X) < 40 && MathF.Abs(o.Y - at.Y) < 40;
+        });
+        Bubbles.Add(new Bubble { Text = text, Anchor = anchor, Life = life, Scale = scale });
+    }
+
+    private string Pick(string[] lines) => lines[Rng.Next(lines.Length)];
 }

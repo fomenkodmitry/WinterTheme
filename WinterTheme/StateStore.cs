@@ -40,7 +40,7 @@ public static class StateStore
                         Width = w.W,
                         Ground = w.Ground.H.Select(h => MathF.Round(h, 1)).ToArray(),
                     };
-                    foreach (var root in w.Balls.Where(b => b.Below == null))
+                    foreach (var root in w.Balls.Where(b => b.Below == null && !b.Flying))
                     {
                         dto.Stacks.Add(new StackDto
                         {

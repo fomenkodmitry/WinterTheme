@@ -41,6 +41,9 @@ public static class Tray
         menu.Items.Add(Action("Вызвать трактор", () => app.OnActiveWorld(w => w.StartTractor())));
         menu.Items.Add(Action("Выпустить Гринча", () => app.OnActiveWorld(w => w.StartGrinch())));
         menu.Items.Add(Action("Позвать Санту", () => app.OnActiveWorld(w => w.StartSanta())));
+        menu.Items.Add(Action("Салют!", () => app.ForEachWorld(w => w.StartFireworks(12))));
+        menu.Items.Add(Action("Падающая звезда", () => app.OnActiveWorld(w => w.ShootingStar())));
+        menu.Items.Add(Action("Репетиция Нового года", () => app.ForEachWorld(w => w.RehearseNewYear())));
         menu.Items.Add(Action("Убрать весь снег", () => app.ForEachWorld(w => w.ClearAll())));
         menu.Items.Add(Action("Растопить снеговиков", () => app.ForEachWorld(w =>
         {
@@ -53,6 +56,9 @@ public static class Tray
         autoMenu.Items.Add(Toggle("Трактор (когда много снега)", () => s.AutoTractor, v => s.AutoTractor = v));
         autoMenu.Items.Add(Toggle("Гринч", () => s.RandomGrinch, v => s.RandomGrinch = v));
         autoMenu.Items.Add(Toggle("Санта", () => s.RandomSanta, v => s.RandomSanta = v));
+        autoMenu.Items.Add(Toggle("Падающие звёзды", () => s.ShootingStars, v => s.ShootingStars = v));
+        autoMenu.Items.Add(Toggle("Снеговики болтают", () => s.Chatter, v => s.Chatter = v));
+        autoMenu.Items.Add(Toggle("Отсчёт и салют в новогоднюю полночь", () => s.NewYearShow, v => s.NewYearShow = v));
         auto.Menu = autoMenu;
         menu.Items.Add(auto);
 
@@ -64,7 +70,9 @@ public static class Tray
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(new NativeMenuItem("Снеговик: зажми ⌥ и катай ком по сугробу") { IsEnabled = false });
         menu.Items.Add(new NativeMenuItem("Брось ком на ком побольше — 3 кома = снеговик") { IsEnabled = false });
-        menu.Items.Add(new NativeMenuItem("Клик по подарку — открыть") { IsEnabled = false });
+        menu.Items.Add(new NativeMenuItem("Клик по подарку — открыть (бывают сюрпризы)") { IsEnabled = false });
+        menu.Items.Add(new NativeMenuItem("Швырни маленький ком — снежок. Попади в Гринча!") { IsEnabled = false });
+        menu.Items.Add(new NativeMenuItem("Клик по саням Санты — ещё подарок") { IsEnabled = false });
         menu.Items.Add(new NativeMenuItemSeparator());
         menu.Items.Add(Action("Выход", app.Quit));
 

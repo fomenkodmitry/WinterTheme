@@ -192,6 +192,27 @@ public sealed class Painter
                     c.DrawRect(-p.Size, -p.Size * 0.4f * MathF.Abs(MathF.Cos(p.Rot * 1.7f)), p.Size * 2, p.Size * 0.8f * MathF.Abs(MathF.Cos(p.Rot * 1.7f)) + 0.5f, _fill);
                     c.Restore();
                     break;
+                case PKind.Rocket:
+                    _stroke.StrokeWidth = 1.6f;
+                    _stroke.Color = new SKColor(255, 220, 150, 200);
+                    c.DrawLine(p.X, p.Y, p.X - p.VX * 0.03f, p.Y - p.VY * 0.03f, _stroke);
+                    _fill.Color = SKColors.White;
+                    c.DrawCircle(p.X, p.Y, 1.8f, _fill);
+                    break;
+                case PKind.Star:
+                {
+                    float tx = p.X - p.VX * 0.14f, ty = p.Y - p.VY * 0.14f;
+                    using var sh = SKShader.CreateLinearGradient(new SKPoint(p.X, p.Y), new SKPoint(tx, ty),
+                        new[] { A(SKColors.White, life), A(new SKColor(180, 210, 255), 0) }, null, SKShaderTileMode.Clamp);
+                    _stroke.StrokeWidth = 2;
+                    _stroke.Color = SKColors.White; // shader output is multiplied by paint alpha
+                    _stroke.Shader = sh;
+                    c.DrawLine(p.X, p.Y, tx, ty, _stroke);
+                    _stroke.Shader = null;
+                    _fill.Color = A(SKColors.White, life);
+                    c.DrawCircle(p.X, p.Y, 1.8f, _fill);
+                    break;
+                }
             }
         }
     }
@@ -714,6 +735,15 @@ public sealed class Painter
             c.DrawPath(mouth, _stroke);
         }
 
+        // snowball splat on the face
+        if (g.HitT < 4)
+        {
+            _fill.Color = A(Snow, 1 - g.HitT / 4);
+            c.DrawCircle(10, -73, 6.5f, _fill);
+            c.DrawCircle(4, -68, 4, _fill);
+            c.DrawCircle(16, -67, 3.5f, _fill);
+        }
+
         // santa hat
         using (var hat = new SKPath())
         {
@@ -875,6 +905,8 @@ public sealed class Painter
         {
             var p = b.Anchor();
             float alpha = Math.Clamp(b.Life * 3, 0, 1);
+            c.Save();
+            if (b.Scale != 1) c.Scale(b.Scale, b.Scale, p.X, p.Y);
             float tw = Measure(_font, b.Text);
             float bw = tw + 16, bh = 22;
             float x = Math.Clamp(p.X - bw / 2, 4, w.W - bw - 4), y = Math.Max(w.MenuBarH + 4, p.Y - bh);
@@ -893,6 +925,7 @@ public sealed class Painter
             }
             _fill.Color = A(new SKColor(30, 40, 60), alpha);
             c.DrawText(b.Text, x + 8, y + 15.5f, _font, _fill);
+            c.Restore();
         }
     }
 

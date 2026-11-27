@@ -34,6 +34,8 @@ public static class DemoRenderer
         Tractor(dir);
         Grinch(dir);
         Building(dir);
+        Fireworks(dir);
+        Snowball(dir);
     }
 
     private static World NewWorld(bool withWindows = true)
@@ -158,6 +160,44 @@ public static class DemoRenderer
         _ = body;
 
         Save(w, Path.Combine(dir, "building.jpg"));
+    }
+
+    private static void Fireworks(string dir)
+    {
+        var w = NewWorld();
+        Accumulate(w, 180);
+        var man = Stack(w, 640, 44, 31, 22);
+        w.MakeSnowman(man, hat: 1, scarf: 0xFF16A34A);
+        w.StartFireworks(20);
+        Simulate(w, 4.6f);
+        w.Bubbles.Clear();
+        w.Say("Уууух!", () => new SKPoint(man.Top.X, man.Top.Y - man.Top.R * 2.3f), 3);
+
+        Save(w, Path.Combine(dir, "fireworks.jpg"));
+    }
+
+    private static void Snowball(string dir)
+    {
+        var w = NewWorld();
+        Accumulate(w, 160);
+        var man = Stack(w, 300, 44, 31, 22);
+        w.MakeSnowman(man, hat: 2, scarf: 0xFFEAB308);
+        w.Bubbles.Clear();
+
+        // let the Grinch steal the nose, then hit him with a thrown snowball
+        w.StartGrinch();
+        int guard = 0;
+        while (w.Grinch.State != GrinchState.Escape && guard++ < 5000) w.Update(Dt);
+        Simulate(w, 0.3f);
+        float gx = w.Grinch.X, gy = w.Ground.SurfaceY(gx) - 60;
+        var ball = new Ball { X = gx + 200 * w.Grinch.Dir, Y = gy - 30, R = 12, Flying = true, VX = -500 * w.Grinch.Dir, VY = -120 };
+        w.Balls.Add(ball);
+        guard = 0;
+        while (w.Balls.Contains(ball) && guard++ < 300) w.Update(Dt);
+        Simulate(w, 0.25f);
+        Console.WriteLine($"snowball: gx={gx} dir={w.Grinch.Dir} grinch hit={w.Grinch.HitT < 1}, nose back={man.Man!.HasNose}");
+
+        Save(w, Path.Combine(dir, "snowball.jpg"));
     }
 
     // ------------------------------------------------------------------ output

@@ -24,6 +24,9 @@ public sealed class Settings
     public bool ShowInScreenshots { get; set; }
     public bool Paused { get; set; }
     public bool Smooth60 { get; set; }
+    public bool NewYearShow { get; set; } = true;
+    public bool ShootingStars { get; set; } = true;
+    public bool Chatter { get; set; } = true;
 
     public float FlakeFactor => Intensity switch { 0 => 0.45f, 2 => 2.6f, _ => 1f };
 

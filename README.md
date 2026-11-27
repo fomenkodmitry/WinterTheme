@@ -12,7 +12,16 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
   Drag the top ball to take the snowman apart, or drag a lower ball to move the whole stack.
 - The Grinch runs by now and then, steals a snowman's carrot nose or Santa's present, and leaves footprints.
   The nose grows back after 3 minutes, or you can ⌥-click the head to put it back right away.
-- Santa flies by with reindeer and drops a present. Click the present to open it.
+- Santa flies by with reindeer and drops a present. Click the present to open it. Click the sleigh for up to 3 more.
+- Presents hold about 70 different wishes, and sometimes a surprise: fireworks, a tiny snowman, a personal snowdrift,
+  a blizzard, the tractor, a piece of coal for bad behavior, or the Grinch himself.
+- **Snowball fight:** pick up a small ball and flick it with the mouse to throw it. Hit the Grinch and he drops
+  the stolen present or gives the carrot back to its snowman.
+- Snowmen talk now and then, and react to the tractor, the Grinch, Santa, fireworks and shooting stars.
+  Some lines depend on the date and time: the days left until New Year, Dec 31, late night.
+- Shooting stars cross the sky, more often in the evening.
+- At midnight on Dec 31 there is a 10-second countdown, then fireworks, confetti and Santa.
+  To see it right away, choose "Репетиция Нового года" in the menu. Fireworks are also in the menu ("Салют!").
 - A garland of lights hangs under the menu bar.
 
 ![Snow on windows, a snowman and Santa](docs/hero.jpg)
@@ -20,6 +29,10 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
 | Rolling a snowball | The Grinch took the nose | The tractor clears the drift |
 |---|---|---|
 | ![](docs/building.jpg) | ![](docs/grinch.jpg) | ![](docs/tractor.jpg) |
+
+| Fireworks | A snowball hit the Grinch and the nose is back |
+|---|---|
+| ![](docs/fireworks.jpg) | ![](docs/snowball.jpg) |
 
 The screenshots are rendered with the app's own simulation and painter on a mock desktop:
 `dotnet run --project WinterTheme -c Release -- --render-screens docs`.
@@ -30,7 +43,7 @@ Snowmen and settled snow are saved in `~/Library/Application Support/WinterTheme
 
 ```bash
 dotnet run --project WinterTheme   # dev
-./build-app.sh                     # dist/WinterTheme-1.0.1-arm64.dmg (Apple Silicon)
+./build-app.sh                     # dist/WinterTheme-1.1.0-arm64.dmg (Apple Silicon)
 ARCH=x64 ./build-app.sh            # Intel
 ARCH=all VERSION=1.1.0 ./build-app.sh
 ```
@@ -46,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/fomenkodmitry/WinterTheme/main/inst
 It downloads the DMG, copies the app to `/Applications` and starts it. Files downloaded with `curl` are not quarantined, so there is no Gatekeeper prompt.
 The snowflake appears in the menu bar. Turn on "Запускать при входе" there to start it at login.
 
-Or download [`release/WinterTheme-1.0.1-arm64.dmg`](release/WinterTheme-1.0.1-arm64.dmg) and drag **WinterTheme** onto **Applications**.
+Or download [`release/WinterTheme-1.1.0-arm64.dmg`](release/WinterTheme-1.1.0-arm64.dmg) and drag **WinterTheme** onto **Applications**.
 The app is ad-hoc signed, not notarized, so macOS says it cannot verify that the app is free of malware. To open it anyway, do one of these:
 - System Settings → Privacy & Security → click "Open Anyway" next to the WinterTheme message.
 - Run `xattr -dr com.apple.quarantine /Applications/WinterTheme.app`.

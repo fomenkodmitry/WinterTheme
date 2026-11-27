@@ -14,6 +14,8 @@ public enum PKind
     Sparkle,
     Smoke,
     Confetti,
+    Rocket,
+    Star,
 }
 
 public sealed class Particle
@@ -38,10 +40,13 @@ public sealed class Snowman
 
 public sealed class Ball
 {
-    public float X, Y, R, Angle, VY;
+    public float X, Y, R, Angle, VX, VY;
     public Ball? Below, Above;
     public Snowman? Man;
     public bool Held;
+
+    /// <summary>Thrown snowball in flight: ignores the stack logic until it splats.</summary>
+    public bool Flying;
 
     public Ball Root
     {
@@ -92,6 +97,7 @@ public sealed class Bubble
     public string Text = "";
     public Func<SKPoint> Anchor = () => default;
     public float Life = 2.5f;
+    public float Scale = 1;
 }
 
 public sealed class Tractor
@@ -128,6 +134,12 @@ public sealed class Grinch
     public object? Target;
     public bool HasCarrot, HasPresent;
     public SKColor PresentColor;
+
+    /// <summary>Snowman whose nose is in the Grinch's hand (gets it back if the Grinch is hit).</summary>
+    public Snowman? Victim;
+
+    /// <summary>Seconds since the last snowball hit (drawn as a snow splat on the face).</summary>
+    public float HitT = 99;
 }
 
 public sealed class Santa
@@ -139,4 +151,6 @@ public sealed class Santa
     public float DropX;
     public bool Dropped;
     public float TrailT;
+    public int Extra;
+    public float ClickCd;
 }
