@@ -573,7 +573,7 @@ public sealed partial class World
             int side = MathF.Sign(dist);
             float x0 = body.X + side * (body.R + 12), y0 = body.Y - body.R * 0.6f;
             float t = Math.Clamp(ad / 520f, 0.35f, 0.85f);
-            float speed = g.State switch { GrinchState.Escape => 280, GrinchState.Run => 170, _ => 0 };
+            float speed = GrinchSpeed * g.State switch { GrinchState.Escape => 280, GrinchState.Run => 170, _ => 0 };
             float tx = g.X + g.Dir * speed * t + Rand(-30, 30), ty = feet - 55;
             Balls.Add(new Ball { X = x0, Y = y0, R = 6, Flying = true, VX = (tx - x0) / t, VY = (ty - y0 - 0.5f * 900 * t * t) / t });
             m.Wave = 1;

@@ -595,10 +595,11 @@ public static partial class DemoRenderer
         p.Color = new SKColor(40, 50, 95);
         using (var hills = new SKPath())
         {
-            hills.MoveTo(0, 640);
-            hills.QuadTo(260, 560, 520, 630);
-            hills.QuadTo(820, 700, 1050, 600);
-            hills.QuadTo(1180, 560, W, 610);
+            // proportions of the original 1280x800 layout, so other sizes (the promo video) look the same
+            hills.MoveTo(0, H * 0.8f);
+            hills.QuadTo(W * 0.203f, H * 0.7f, W * 0.406f, H * 0.7875f);
+            hills.QuadTo(W * 0.64f, H * 0.875f, W * 0.82f, H * 0.75f);
+            hills.QuadTo(W * 0.922f, H * 0.7f, W, H * 0.7625f);
             hills.LineTo(W, H);
             hills.LineTo(0, H);
             hills.Close();
@@ -622,8 +623,16 @@ public static partial class DemoRenderer
             c.DrawText(t, x, 17, thin, p);
             x += t.Length * 7.5f + 18;
         }
-        c.DrawText("Mon 22 Dec  18:42", W - 135, 17, thin, p);
-        DrawFlakeIcon(c, W - 160, 12.5f);
+        if (W >= 800)
+        {
+            c.DrawText("Mon 22 Dec  18:42", W - 135, 17, thin, p);
+            DrawFlakeIcon(c, W - 160, 12.5f);
+        }
+        else
+        {
+            c.DrawText("18:42", W - 50, 17, thin, p);
+            DrawFlakeIcon(c, W - 75, 12.5f);
+        }
 
         // dock
         var dock = new SKRect(W / 2 - 250, H - 68, W / 2 + 250, H - 6);

@@ -84,6 +84,9 @@ public sealed partial class World
     /// <summary>For the promo video: the next opened present gives a plain wish, not a random surprise.</summary>
     internal bool NextPresentPlain;
 
+    /// <summary>For the promo video on a narrow screen: the Grinch runs slower so the camera can keep up.</summary>
+    internal float GrinchSpeed = 1;
+
     public void PollInput()
     {
         var p = Quartz.MouseLocation();
@@ -1270,7 +1273,7 @@ public sealed partial class World
         {
             case GrinchState.Run:
             {
-                g.X += g.Dir * 170 * dt;
+                g.X += g.Dir * 170 * GrinchSpeed * dt;
                 g.Step += dt * 13;
                 if (g.Target != null)
                 {
@@ -1324,7 +1327,7 @@ public sealed partial class World
                 }
                 break;
             case GrinchState.Escape:
-                g.X += g.Dir * (g.Reformed ? 90 : 280) * dt;
+                g.X += g.Dir * (g.Reformed ? 90 : 280) * GrinchSpeed * dt;
                 g.Step += dt * (g.Reformed ? 9 : 18);
                 break;
         }

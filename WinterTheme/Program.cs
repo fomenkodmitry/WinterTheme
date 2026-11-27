@@ -25,9 +25,9 @@ internal static class Program
         }
 
         // promo video frames (encoded to mp4 separately)
-        if (args.Length == 2 && args[0] == "--render-video")
+        if (args.Length >= 2 && args[0] == "--render-video")
         {
-            Demo.DemoRenderer.RenderPromo(args[1]);
+            Demo.DemoRenderer.RenderPromo(args[1], vertical: !(args.Length > 2 && args[2] == "horizontal"));
             return 0;
         }
 

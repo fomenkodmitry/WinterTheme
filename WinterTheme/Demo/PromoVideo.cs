@@ -6,14 +6,50 @@ using WinterTheme.Sim;
 namespace WinterTheme.Demo;
 
 /// <summary>
-/// A scripted horizontal promo clip (1920x1080, 30 fps) rendered offscreen with the real simulation and painter.
-/// Run with: WinterTheme --render-video &lt;dir&gt;, then encode the JPEG frames, e.g.
-/// ffmpeg -framerate 30 -i &lt;dir&gt;/f%05d.jpg -c:v libx264 -pix_fmt yuv420p -crf 18 promo.mp4
+/// A scripted promo clip rendered offscreen with the real simulation and painter, 30 fps JPEG frames:
+/// vertical 1080x1920 for Reels/Shorts/TikTok by default, or horizontal 1920x1080.
+/// Run with: WinterTheme --render-video &lt;dir&gt; [vertical|horizontal]; promo.sh encodes it with ffmpeg.
 /// </summary>
 public static partial class DemoRenderer
 {
-    private const int VideoW = 1920, VideoH = 1080;
+    /// <summary>Where things go in one orientation. Coordinates are mock-desktop points.</summary>
+    private sealed record Layout(
+        float W, float H, float Scale,
+        SKRect Terminal, SKRect Editor,
+        float KingX, float BaseX, float MiniX,
+        float RollFrom, float RollTo,
+        float SantaX, float SantaY, float SantaDropX, int SantaDir,
+        float GrinchX, int GrinchDir, SKPoint ThrowFrom, float GrinchSpeed,
+        float TractorSpeed, float TractorHold,
+        float RiderDx, SKPoint WindowDrag, float JerkOut, float JerkBack,
+        SKPoint CaptionCenter, float CaptionMaxW,
+        SKPoint IntroCursor, SKPoint EndCursor);
 
+    private static readonly Layout Vertical = new(
+        W: 540, H: 960, Scale: 2,
+        Terminal: new SKRect(20, 470, 520, 730), Editor: new SKRect(40, 150, 500, 430),
+        KingX: 400, BaseX: 115, MiniX: 498,
+        RollFrom: 185, RollTo: 290,
+        SantaX: 560, SantaY: 92, SantaDropX: 270, SantaDir: -1,
+        GrinchX: -60, GrinchDir: 1, ThrowFrom: new SKPoint(165, 630), GrinchSpeed: 0.45f,
+        TractorSpeed: 110, TractorHold: 5.0f,
+        RiderDx: 300, WindowDrag: new SKPoint(40, 60), JerkOut: 50, JerkBack: -200,
+        CaptionCenter: new SKPoint(270, 600), CaptionMaxW: 500,
+        IntroCursor: new SKPoint(300, 380), EndCursor: new SKPoint(470, 880));
+
+    private static readonly Layout Horizontal = new(
+        W: 1280, H: 720, Scale: 1.5f,
+        Terminal: new SKRect(90, 170, 640, 560), Editor: new SKRect(520, 110, 1170, 520),
+        KingX: 190, BaseX: 760, MiniX: 1190,
+        RollFrom: 330, RollTo: 640,
+        SantaX: 1150, SantaY: 110, SantaDropX: 640, SantaDir: -1,
+        GrinchX: 470, GrinchDir: 1, ThrowFrom: new SKPoint(990, 330), GrinchSpeed: 1,
+        TractorSpeed: 170, TractorHold: 5.2f,
+        RiderDx: 330, WindowDrag: new SKPoint(110, 40), JerkOut: 70, JerkBack: -260,
+        CaptionCenter: new SKPoint(365, 345), CaptionMaxW: 640,
+        IntroCursor: new SKPoint(640, 380), EndCursor: new SKPoint(1260, 700));
+
+    private static Layout L = Vertical;
     private static World _w = null!;
     private static Painter _painter = null!;
     private static SKSurface _surface = null!;
@@ -21,17 +57,18 @@ public static partial class DemoRenderer
     private static int _frame;
 
     // scripted cursor and captions
-    private static float _cx = 640, _cy = 380;
+    private static float _cx, _cy;
     private static bool _down, _option;
     private static string? _title, _sub;
     private static int _captionFrame;
     private static float _keyFade;
 
-    public static void RenderPromo(string dir)
+    public static void RenderPromo(string dir, bool vertical = true)
     {
         Directory.CreateDirectory(dir);
         foreach (var f in Directory.GetFiles(dir, "f*.jpg")) File.Delete(f);
         _dir = dir;
+        L = vertical ? Vertical : Horizontal;
 
         var s = Settings.Current; // in-memory only, never saved here
         s.AutoTractor = s.RandomGrinch = s.RandomSanta = false;
@@ -40,13 +77,17 @@ public static partial class DemoRenderer
         s.Melt = s.Paused = false;
         s.CursorPush = true;
 
-        W = 1280;
-        H = 720;
-        Scale = VideoW / W;
-        _surface = SKSurface.Create(new SKImageInfo(VideoW, VideoH, SKColorType.Rgba8888, SKAlphaType.Premul));
+        W = L.W;
+        H = L.H;
+        Scale = L.Scale;
+        SetWindow(2, L.Terminal);
+        SetWindow(1, L.Editor);
+        (_cx, _cy) = (L.IntroCursor.X, L.IntroCursor.Y);
+        _surface = SKSurface.Create(new SKImageInfo((int)(W * Scale), (int)(H * Scale), SKColorType.Rgba8888, SKAlphaType.Premul));
         _painter = new Painter();
 
         _w = NewWorld();
+        _w.GrinchSpeed = L.GrinchSpeed;
         Accumulate(_w, 200);
         foreach (var p in _w.PileOrder)
             for (int i = 0; i < p.N; i++) p.H[i] = Math.Max(p.H[i], 6);
@@ -54,13 +95,13 @@ public static partial class DemoRenderer
         _w.Particles.Clear();
         _w.Bubbles.Clear();
 
-        // a small crowd for later: the Snow King on the left and a tiny one on the right
-        var king = Stack(_w, 190, 66, 46, 31);
+        // a small crowd for later: the Snow King and a tiny one
+        var king = Stack(_w, L.KingX, 66, 46, 31);
         _w.MakeSnowman(king, hat: 4, scarf: 0xFFEC4899, name: "Снежный Король");
-        var mini = Stack(_w, 1190, 13, 9, 6);
+        var mini = Stack(_w, L.MiniX, 13, 9, 6);
         _w.MakeSnowman(mini, hat: 2, scarf: 0xFFDC2626);
         // the base of the snowman we build on camera
-        var baseStack = Stack(_w, 760, 46, 33);
+        var baseStack = Stack(_w, L.BaseX, 46, 33);
         Simulate(_w, 2);
         _w.Bubbles.Clear();
 
@@ -70,10 +111,16 @@ public static partial class DemoRenderer
         GrinchScene(man);
         TractorScene();
         WindowScene();
-        NightScene(man, mini, king);
+        NightScene(man);
         Finale();
 
-        Console.WriteLine($"promo: {_frame} frames ({_frame / 30f:F1} s) in {dir}");
+        Console.WriteLine($"promo: {_frame} frames ({_frame / 30f:F1} s), {(int)(W * Scale)}x{(int)(H * Scale)}, in {dir}");
+    }
+
+    private static void SetWindow(int id, SKRect rect)
+    {
+        int i = Array.FindIndex(Windows, m => m.Id == id);
+        Windows[i] = Windows[i] with { Rect = rect };
     }
 
     // ------------------------------------------------------------------ scenes
@@ -87,32 +134,36 @@ public static partial class DemoRenderer
     private static Ball BuildSnowman(Ball baseStack)
     {
         Caption("Лепи снеговиков", "зажми Option и катай ком по сугробу");
-        float gx = 330;
+        float gx = L.RollFrom;
         MoveTo(gx, _w.Ground.SurfaceY(gx) - 6, 0.9f);
         _option = true;
         Hold(0.3f);
         _down = true;
         Hold(0.1f);
-        // roll along the drift
-        for (float t = 0; t < 3f && (_w.Held == null || _w.Held.R < 25 || t < 1.2f) && (_w.Held == null || _w.Held.R < 30); t += Dt)
+
+        // roll back and forth along the drift until the ball is head-sized
+        int dir = 1;
+        for (float t = 0; t < 3.5f && (_w.Held == null || _w.Held.R < 25 || t < 1.2f) && (_w.Held == null || _w.Held.R < 30); t += Dt)
         {
-            _cx += 110 * Dt;
+            _cx += dir * 110 * Dt;
+            if (_cx > L.RollTo) dir = -1;
+            if (_cx < L.RollFrom) dir = 1;
             _cy = _w.Ground.SurfaceY(_cx) - 6;
             Frame();
         }
         _option = false;
         var ball = _w.Held;
         Console.WriteLine($"promo: rolled ball r={ball?.R:F1}");
-        // carry it onto the base and drop
+
+        // a quick lift off the drift (a slow one keeps rolling it), then carry it over and drop
         float tx = baseStack.X, ty = baseStack.Above!.Y - baseStack.Above.R - (ball?.R ?? 20) - 20;
-        // a quick lift off the drift (a slow one keeps rolling it), then carry it over
         MoveTo(_cx + 10, _cy - 110, 0.15f);
         MoveTo(tx, ty, 1.1f, ease: true);
         _down = false;
         Hold(0.2f);
         Console.WriteLine($"promo: snowman made={baseStack.Man != null}");
         Hold(2.2f);
-        MoveTo(760, 330, 0.7f);
+        MoveTo(L.IntroCursor.X, L.IntroCursor.Y - 50, 0.7f);
         return baseStack;
     }
 
@@ -121,13 +172,12 @@ public static partial class DemoRenderer
         Caption("Санта дарит подарки", "кликни по подарку, чтобы открыть");
         _w.StartSanta();
         var s = _w.Santa;
-        s.Dir = -1;
-        s.X = 1150;
-        s.Y0 = 110;
-        s.DropX = 640;
+        s.Dir = L.SantaDir;
+        s.X = L.SantaX;
+        s.Y0 = L.SantaY;
+        s.DropX = L.SantaDropX;
         s.Dropped = false;
         _w.Bubbles.Clear();
-        // wait for the present to land
         for (int k = 0; k < 30 * 6 && !_w.Presents.Any(p => p.Landed); k++) Frame();
         var present = _w.Presents.FirstOrDefault(p => p.Landed);
         Hold(0.4f);
@@ -146,28 +196,28 @@ public static partial class DemoRenderer
     private static void GrinchScene(Ball man)
     {
         Caption("Гринч ворует морковку", "закидай его снежками");
-        MoveTo(990, 330, 0.6f);
+        MoveTo(L.ThrowFrom.X, L.ThrowFrom.Y, 0.6f);
         _w.Presents.Clear();
         _w.StartGrinch();
         var g = _w.Grinch;
         g.Target = man;
-        g.Dir = 1;
-        g.X = 470;
+        g.Dir = L.GrinchDir;
+        g.X = L.GrinchX;
         _w.Bubbles.Clear();
-        for (int k = 0; k < 30 * 4 && g.State != GrinchState.Escape && !g.HasCarrot; k++) Frame();
-        Hold(0.3f);
+        for (int k = 0; k < 30 * 5 && !g.HasCarrot; k++) Frame();
+        Hold(0.2f);
 
-        // three snowballs from the cursor
+        // snowballs from the cursor once he has the carrot, thrown when they fly clear of the snowman
         int throws = 0;
-        // throw once he is past the snowman, so the snowballs fly clear of it
         for (int k = 0; k < 30 * 5 && g.Active && !g.Reformed; k++)
         {
-            if (g.X > man.X + 70 && k % 9 == 0 && throws < 7)
+            bool clear = MathF.Sign(g.X - man.X) != MathF.Sign(_cx - man.X) || MathF.Abs(g.X - man.X) > 70;
+            if (clear && k % 6 == 0 && throws < 9)
             {
                 throws++;
                 Flick(g);
             }
-            Frame();
+            else Frame();
         }
         if (g.Reformed) Caption("Три снежка — и Гринч исправился", "а нос вернулся к снеговику");
         Hold(3.4f);
@@ -180,27 +230,30 @@ public static partial class DemoRenderer
     /// <summary>A quick flick of the cursor that launches a snowball at the Grinch.</summary>
     private static void Flick(Grinch g)
     {
-        float feet = _w.Ground.SurfaceY(g.X);
+        float feet = _w.Ground.SurfaceY(Math.Clamp(g.X, 0, W - 1));
         float x0 = _cx + 10, y0 = _cy - 10;
         const float t = 0.42f;
-        float speed = g.State switch { GrinchState.Escape => g.Reformed ? 90 : 280, GrinchState.Run => 170, _ => 0 };
+        float speed = _w.GrinchSpeed * g.State switch { GrinchState.Escape => g.Reformed ? 90 : 280, GrinchState.Run => 170, _ => 0 };
         float tx = g.X + g.Dir * speed * t, ty = feet - 55;
         _w.Balls.Add(new Ball { X = x0, Y = y0, R = 7, Flying = true, VX = (tx - x0) / t, VY = (ty - y0 - 0.5f * 900 * t * t) / t });
-        _cx += 14;
+        _cx += 10;
         _cy -= 10;
+        Frame();
+        _cx -= 10;
+        _cy += 10;
     }
 
     private static void TractorScene()
     {
         Caption("Трактор сам чистит сугробы", null);
-        MoveTo(640, 300, 0.5f);
+        MoveTo(L.IntroCursor.X, L.IntroCursor.Y - 80, 0.5f);
         for (int i = 0; i < _w.Ground.N; i++)
             _w.Ground.H[i] = Math.Max(_w.Ground.H[i], 34 + 8 * MathF.Sin(i * 0.07f) + 4 * MathF.Sin(i * 0.31f));
         _w.StartTractor();
         _w.Tractor.Dir = 1;
         _w.Tractor.X = -120;
-        _w.Tractor.Speed = 170;
-        Hold(5.2f);
+        _w.Tractor.Speed = L.TractorSpeed;
+        Hold(L.TractorHold);
         _w.Tractor.Active = false;
         _w.Ground.Wall = -1;
         _w.Bubbles.Clear();
@@ -211,9 +264,8 @@ public static partial class DemoRenderer
         Caption("Ставь снеговиков на окна", "они едут вместе с окном");
         int idx = Array.FindIndex(Windows, m => m.Id == 1);
         var start = Windows[idx].Rect;
-        var rider = Stack(_w, start.Left + 330, 22, 16, 11);
+        var rider = Stack(_w, start.Left + L.RiderDx, 22, 16, 11);
         _w.MakeSnowman(rider, hat: 3, scarf: 0xFFEAB308, name: "Пассажир");
-        foreach (var b in rider.StackFromRoot()) b.Y -= 90 + b.R;
         rider.Y = start.Top - 70;
         _w.Bubbles.Clear();
         MoveTo(start.MidX, start.Top + 12, 1.0f, ease: true);
@@ -221,16 +273,16 @@ public static partial class DemoRenderer
 
         // drag the window by its title bar: the snowman rides along
         _down = true;
-        MoveWindow(idx, start, 110, 40, 1.6f);
+        MoveWindow(idx, start, L.WindowDrag.X, L.WindowDrag.Y, 1.5f);
         Caption("Ставь снеговиков на окна", "а резко дёрнешь — разобьётся");
-        MoveWindow(idx, Windows[idx].Rect, 70, 0, 0.25f);
-        MoveWindow(idx, Windows[idx].Rect, -260, -10, 0.25f);
+        MoveWindow(idx, Windows[idx].Rect, L.JerkOut, 0, 0.25f);
+        MoveWindow(idx, Windows[idx].Rect, L.JerkBack, -10, 0.25f);
         _down = false;
         Hold(2.6f);
         Console.WriteLine($"promo: rider broken={!_w.Balls.Contains(rider)}");
 
-        // put the window back
-        MoveWindow(idx, Windows[idx].Rect, start.Left - Windows[idx].Rect.Left, start.Top - Windows[idx].Rect.Top, 0.01f);
+        // the window goes back to where it was
+        MoveWindow(idx, Windows[idx].Rect, start.Left - Windows[idx].Rect.Left, start.Top - Windows[idx].Rect.Top, 0.4f);
         _w.Bubbles.Clear();
     }
 
@@ -249,15 +301,14 @@ public static partial class DemoRenderer
         }
     }
 
-    private static void NightScene(Ball man, Ball mini, Ball king)
+    private static void NightScene(Ball man)
     {
-        Caption("Снегири, северное сияние", "и пасхалки: тапни снеговика 5 раз");
+        Caption("Снегири и северное сияние", "а ещё пасхалки: тапни снеговика 5 раз");
         _w.StartAurora(40);
         _w.SpawnFlock();
         _w.SpawnFlock();
         _w.ShootingStar();
         _w.Bubbles.Clear();
-        var head = man.Top;
         MoveTo(man.X, man.Above!.Y, 1.4f, ease: true);
         Hold(0.8f);
         for (int k = 0; k < 5; k++)
@@ -265,20 +316,17 @@ public static partial class DemoRenderer
             Click(2);
             Hold(0.08f);
         }
-        MoveTo(man.X + 90, man.Above.Y - 120, 0.6f, ease: true);
+        MoveTo(Math.Min(W - 40, man.X + 90), man.Above.Y - 120, 0.6f, ease: true);
         Hold(6.5f);
-        _ = head;
-        _ = mini;
-        _ = king;
     }
 
     private static void Finale()
     {
         Caption("С Новым годом!", "github.com/fomenkodmitry/WinterTheme");
         _w.StartFireworks(10);
-        for (int k = 0; k < 6; k++) _w.Confetti(1280 * (k + 0.5f) / 6, MenuH + 10, 40);
+        for (int k = 0; k < 6; k++) _w.Confetti(W * (k + 0.5f) / 6, MenuH + 10, 40);
         _w.Bubbles.Clear();
-        MoveTo(1260, 700, 1.0f);
+        MoveTo(L.EndCursor.X, L.EndCursor.Y, 1.0f);
         Hold(5.5f);
     }
 
@@ -323,15 +371,10 @@ public static partial class DemoRenderer
     {
         _w.FeedInput(_cx, _cy, _down, _option);
         if (_frame % 3 == 0)
-            _w.UpdateWindows(Windows.Select(m => new WinInfoFor(m)).Select(x => x.Info).ToList());
+            _w.UpdateWindows(Windows.Select(m => new Quartz.WinInfo(m.Id, new CGRect(m.Rect.Left, m.Rect.Top, m.Rect.Width, m.Rect.Height))).ToList());
         _w.Update(Dt);
         RenderVideoFrame();
         _frame++;
-    }
-
-    private readonly record struct WinInfoFor(MockWindow M)
-    {
-        public Quartz.WinInfo Info => new(M.Id, new CGRect(M.Rect.Left, M.Rect.Top, M.Rect.Width, M.Rect.Height));
     }
 
     // ------------------------------------------------------------------ drawing
@@ -373,8 +416,7 @@ public static partial class DemoRenderer
         path.Close();
         c.Save();
         c.Translate(_cx, _cy);
-        float s = _down ? 0.92f : 1f;
-        c.Scale(s);
+        c.Scale(_down ? 0.92f : 1f);
         using var shadow = new SKPaint { IsAntialias = true, Color = new SKColor(0, 0, 0, 70), MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 1.5f) };
         c.Save();
         c.Translate(1, 1.5f);
@@ -410,34 +452,50 @@ public static partial class DemoRenderer
         c.DrawText("option", rect.Left + 50, rect.Top + 34, txt, ink);
     }
 
+    /// <summary>Title and subtitle centered on the dark terminal window, where nothing else happens.</summary>
     private static void DrawCaption(SKCanvas c)
     {
         if (_title == null) return;
         float age = (_frame - _captionFrame) / 30f;
         float a = Math.Clamp(age / 0.35f, 0, 1);
         float rise = (1 - a) * 12;
-        using var titleFont = new SKFont(Bold, 36);
-        using var subFont = new SKFont(Regular, 20);
+
         using var measure = new SKPaint { IsAntialias = true };
-        float Width(SKFont f, string text)
+        float Width(SKTypeface tf, float size, string text)
         {
-            measure.Typeface = f.Typeface;
-            measure.TextSize = f.Size;
+            measure.Typeface = tf;
+            measure.TextSize = size;
             return measure.MeasureText(text);
         }
-        float tw = Width(titleFont, _title), sw = _sub == null ? 0 : Width(subFont, _sub);
-        // centered on the dark terminal window, where nothing else happens
-        float cx = 365, cy = 345;
-        float bw = Math.Max(tw, sw) + 56, bh = _sub == null ? 66 : 100;
+        // shrink the text to fit the window
+        float maxW = L.CaptionMaxW - 40;
+        float titleSize = 36, subSize = 20;
+        float tw = Width(Bold, titleSize, _title);
+        if (tw > maxW)
+        {
+            titleSize *= maxW / tw;
+            tw = Width(Bold, titleSize, _title);
+        }
+        float sw = _sub == null ? 0 : Width(Regular, subSize, _sub);
+        if (sw > maxW)
+        {
+            subSize *= maxW / sw;
+            sw = Width(Regular, subSize, _sub!);
+        }
+
+        using var titleFont = new SKFont(Bold, titleSize);
+        using var subFont = new SKFont(Regular, subSize);
+        float cx = L.CaptionCenter.X, cy = L.CaptionCenter.Y;
+        float bw = Math.Max(tw, sw) + 40, bh = _sub == null ? titleSize + 30 : titleSize + subSize + 44;
         float x = cx - bw / 2, y = cy - bh / 2 + rise;
-        using var bg = new SKPaint { IsAntialias = true, Color = new SKColor(12, 20, 40, (byte)(200 * a)) };
-        c.DrawRoundRect(SKRect.Create(x, y, bw, bh), 22, 22, bg);
+        using var bg = new SKPaint { IsAntialias = true, Color = new SKColor(12, 20, 40, (byte)(205 * a)) };
+        c.DrawRoundRect(SKRect.Create(x, y, bw, bh), 20, 20, bg);
         using var ink = new SKPaint { IsAntialias = true, Color = SKColors.White.WithAlpha((byte)(255 * a)) };
-        c.DrawText(_title, cx - tw / 2, y + 46, titleFont, ink);
+        c.DrawText(_title, cx - tw / 2, y + 14 + titleSize * 0.95f, titleFont, ink);
         if (_sub != null)
         {
             ink.Color = new SKColor(200, 222, 255, (byte)(255 * a));
-            c.DrawText(_sub, cx - sw / 2, y + 80, subFont, ink);
+            c.DrawText(_sub, cx - sw / 2, y + 24 + titleSize + subSize * 0.95f, subFont, ink);
         }
     }
 }
