@@ -40,6 +40,9 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
 
 The full list of features and easter eggs (in Russian) is in [FEATURES.md](FEATURES.md).
 
+Promo video (1080p, 56 s): [docs/promo.mp4](docs/promo.mp4). It is rendered offscreen by the app itself
+(`./promo.sh`), not screen-recorded.
+
 ![Snow on windows, a snowman and Santa](docs/hero.jpg)
 
 | Rolling a snowball | The Grinch took the nose | The tractor clears the drift |
