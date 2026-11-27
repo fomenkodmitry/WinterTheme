@@ -28,6 +28,9 @@ public sealed class Settings
     public bool ShootingStars { get; set; } = true;
     public bool Chatter { get; set; } = true;
     public bool LinkScreens { get; set; } = true;
+    public bool Icicles { get; set; } = true;
+    public bool Birds { get; set; } = true;
+    public bool Aurora { get; set; } = true;
 
     public float FlakeFactor => Intensity switch { 0 => 0.45f, 2 => 2.6f, _ => 1f };
 

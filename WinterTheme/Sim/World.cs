@@ -5,7 +5,7 @@ using WinterTheme.Native;
 namespace WinterTheme.Sim;
 
 /// <summary>Whole winter scene for one display. Coordinates are local points, top-left origin, y down.</summary>
-public sealed class World
+public sealed partial class World
 {
     public readonly Cocoa.ScreenInfo Screen;
     public readonly float W, H, MenuBarH;
@@ -44,11 +44,14 @@ public sealed class World
     private float _nextChat = 35, _nextStar = 45, _flurryT;
     private float _showT, _showNext;
     private float _countdown = -1, _clockCheck;
-    private int _lastCount, _countdownYear, _celebratedYear;
+    private int _lastCount, _countdownYear, _celebratedYear, _leetDay = -1, _oldNewYear;
     private float _throwVX, _throwVY;
 
     private static readonly Settings S = Settings.Current;
     private const float MaxBallR = 76;
+
+    /// <summary>Landing faster than this (a fall of about 160 points) breaks a ball or a snowman.</summary>
+    private const float BreakSpeed = 560;
 
     public World(Cocoa.ScreenInfo screen)
     {
@@ -97,6 +100,7 @@ public sealed class World
         UpdateEvents(dt);
         UpdateShow(dt);
         UpdateClock(dt);
+        UpdateFun(dt);
 
         for (int i = Bubbles.Count - 1; i >= 0; i--)
         {
@@ -108,6 +112,7 @@ public sealed class World
         {
             Ground.Melt(dt * 0.035f);
             foreach (var p in PileOrder) p.Melt(dt * 0.02f);
+            MeltSnowmen(dt);
         }
     }
 
@@ -322,6 +327,26 @@ public sealed class World
                         dead = true;
                     }
                     break;
+                case PKind.Note:
+                case PKind.Heart:
+                    p.VX *= 1 - 0.8f * dt;
+                    p.VY *= 1 - 0.4f * dt;
+                    break;
+                case PKind.Drop:
+                    p.VY += 600 * dt;
+                    if (p.Y >= Ground.SurfaceY(Math.Clamp(p.X, 0, W - 1))) dead = true;
+                    break;
+                case PKind.Shard:
+                    p.VY += 900 * dt;
+                    p.Rot += dt * 6;
+                    if (p.Y >= Ground.SurfaceY(Math.Clamp(p.X, 0, W - 1)))
+                    {
+                        dead = true;
+                        SKColor[] ice = { new(220, 240, 255), SKColors.White };
+                        for (int k = 0; k < 6; k++)
+                            Spawn(PKind.Sparkle, p.X, p.Y - 2, Rand(-60, 60), Rand(-90, -20), Rand(1, 2), Rand(0.3f, 0.7f), ice[k % 2]);
+                    }
+                    break;
                 case PKind.Star:
                     if (Rng.NextDouble() < 0.6)
                         Spawn(PKind.Sparkle, p.X, p.Y, p.VX * 0.05f + Rand(-10, 10), p.VY * 0.05f + Rand(-10, 10),
@@ -369,6 +394,7 @@ public sealed class World
 
     private void Shed(Pile p, float vxBias = 0)
     {
+        if (p is WindowPile wp) DropIcicles(wp, vxBias);
         int step = Math.Max(3, p.N / 70);
         for (int i = 0; i < p.N; i += step)
         {
@@ -396,6 +422,8 @@ public sealed class World
             rects.Add((wi.Id, x, y, w, h));
         }
 
+        TrackShake(rects);
+
         var seen = new HashSet<int>();
         PileOrder.Clear();
         for (int idx = 0; idx < rects.Count; idx++)
@@ -416,6 +444,9 @@ public sealed class World
                     Shed(pile, (x - pile.Bx) * 4);
                     pile = new WindowPile(id, x, y, w, h);
                     WinPiles[id] = pile;
+                    foreach (var r in Balls)
+                        if (r.Below == null && r.SupportId == id && r.Man != null && Rng.NextDouble() < 0.08)
+                            SayMan(r, Pick(RideLines), 1.5f);
                 }
             }
             else if (eligible)
@@ -492,7 +523,8 @@ public sealed class World
         var hover = MouseInside ? HitBall(Mx, My, 5) : null;
         var hoverPresent = MouseInside ? HitPresent(Mx, My) : null;
         bool hoverSanta = MouseInside && HitSanta(Mx, My);
-        HoverBall = hover != null || hoverPresent != null || hoverSanta;
+        var hoverHat = MouseInside && hover == null ? HitHat(Mx, My) : null;
+        HoverBall = hover != null || hoverPresent != null || hoverSanta || hoverHat != null;
 
         bool interactiveBefore = HoverInteractive;
         HoverInteractive = Held != null ||
@@ -500,7 +532,10 @@ public sealed class World
 
         // only react to presses that our (interactive) window actually swallowed
         if (pressed && interactiveBefore && MouseInside && Held == null)
-            OnPress(hover, hoverPresent, hoverSanta);
+        {
+            if (hoverHat != null && hoverPresent == null) ReturnHat(hoverHat);
+            else OnPress(hover, hoverPresent, hoverSanta);
+        }
 
         if (Held != null)
         {
@@ -517,6 +552,7 @@ public sealed class World
             {
                 Push(Ground, vx);
                 foreach (var p in PileOrder) Push(p, vx);
+                if (S.Icicles) PokeIcicles(vx);
             }
         }
     }
@@ -548,23 +584,28 @@ public sealed class World
                 return;
             }
 
+            _pressX = Mx;
+            _pressY = My;
+            _pressT = Time;
+            _tapRoot = root.Man != null ? root : null;
+
             Ball grab;
             if (hover.Above == null && hover.Below != null)
             {
-                // pull the top ball off the stack
-                root.Man = null;
-                hover.Below.Above = null;
-                hover.Below = null;
+                // the top ball comes off the stack once the drag really starts (a short tap is a tap)
+                _pendingDetach = hover;
                 grab = hover;
             }
             else
             {
+                _pendingDetach = null;
                 grab = hover.Above != null ? root : hover;
             }
 
             Held = grab;
             grab.Held = true;
             grab.Flying = false;
+            grab.SupportId = -1;
             _holdOffX = grab.X - Mx;
             _holdOffY = grab.Y - My;
             return;
@@ -591,6 +632,17 @@ public sealed class World
 
     private void DragHeld(float dt)
     {
+        if (_pendingDetach != null)
+        {
+            if (MathF.Abs(Mx - _pressX) + MathF.Abs(My - _pressY) < 7) return;
+            var top = _pendingDetach;
+            _pendingDetach = null;
+            ScareBirdsOn(top.Root);
+            top.Root.Man = null;
+            if (top.Below != null) top.Below.Above = null;
+            top.Below = null;
+        }
+
         // dragged onto the next display: the ball (or the whole snowman) goes with the cursor
         if ((Mx >= W || Mx < 0) && Next(Mx >= W ? 1 : -1) is { } n)
         {
@@ -609,22 +661,35 @@ public sealed class World
 
         if (b.Above == null && b.Below == null)
         {
+            // rolls on the ground drift, or on a window cap when held right at its surface
             float groundY = Ground.SurfaceY(nx) - b.R * 0.85f;
-            if (ny >= groundY - b.R * 0.35f)
+            Pile? surf = ny >= groundY - b.R * 0.35f ? Ground : null;
+            if (surf == null && S.SnowOnWindows)
+                foreach (var p in PileOrder)
+                {
+                    if (!p.Contains(nx) || !p.VisibleAt(nx)) continue;
+                    float py = p.SurfaceY(nx) - b.R * 0.85f;
+                    if (ny >= py - b.R * 0.35f && ny <= py + b.R * 0.6f)
+                    {
+                        surf = p;
+                        break;
+                    }
+                }
+            if (surf != null)
             {
-                // rolling along the drift: pick up snow and grow
+                // rolling along the snow: pick up snow and grow
                 float dx = nx - b.X;
                 b.Angle += dx / b.R;
                 float per = Math.Min(MathF.Abs(dx) * 0.35f, 4f);
                 if (per > 0.01f && b.R < MaxBallR)
                 {
-                    float taken = Ground.Take(nx - b.R * 0.55f, nx + b.R * 0.55f, per);
-                    float area = b.R * b.R + taken * Ground.BinW * 2.2f / MathF.PI;
+                    float taken = surf.Take(nx - b.R * 0.55f, nx + b.R * 0.55f, per);
+                    float area = b.R * b.R + taken * surf.BinW * 2.2f / MathF.PI;
                     b.R = Math.Min(MaxBallR, MathF.Sqrt(area));
                     if (taken > 1.5f && Rng.NextDouble() < 0.5)
-                        Powder(nx - Math.Sign(dx) * b.R * 0.8f, Ground.SurfaceY(nx), 1, 30, 30);
+                        Powder(nx - Math.Sign(dx) * b.R * 0.8f, surf.SurfaceY(nx), 1, 30, 30);
                 }
-                ny = Ground.SurfaceY(nx) - b.R * 0.85f;
+                ny = surf.SurfaceY(nx) - b.R * 0.85f;
                 _holdOffY = ny - My;
             }
             b.X = nx;
@@ -643,6 +708,21 @@ public sealed class World
         var b = Held!;
         b.Held = false;
         Held = null;
+
+        bool tap = Time - _pressT < 0.35f && MathF.Abs(Mx - _pressX) + MathF.Abs(My - _pressY) < 7;
+        var tapRoot = _tapRoot;
+        _tapRoot = null;
+        if (_pendingDetach != null)
+        {
+            _pendingDetach = null;
+            if (tap && tapRoot != null) OnTap(tapRoot);
+            return;
+        }
+        if (tap && tapRoot?.Man != null)
+        {
+            OnTap(tapRoot);
+            return;
+        }
 
         if (b.Above != null || b.Below != null) return;
 
@@ -686,11 +766,20 @@ public sealed class World
         "Какой я красивый!", "Спасибо, что слепил!", "Я тут постою, ладно?", "Морковка на месте. Начинаем!",
     };
 
-    public void MakeSnowman(Ball root, int hat = -1, uint scarf = 0, bool nose = true, string? hello = null)
+    public void MakeSnowman(Ball root, int hat = -1, uint scarf = 0, bool nose = true, string? hello = null, string? name = null)
     {
+        bool giant = root.R >= 66, mini = root.R <= 13;
+        name ??= giant ? "Снежный Король" : Pick(Names);
+        if (hat < 0)
+        {
+            if (giant) hello ??= "Я — Снежный Король! Склонитесь!";
+            else if (mini) hello ??= "Пи-пи! Я мини-снеговик!";
+            else if (Rng.NextDouble() < 0.35) hello ??= $"Привет! Я {name}!";
+        }
         root.Man = new Snowman
         {
-            Hat = hat >= 0 ? hat : Rng.Next(4),
+            Name = name,
+            Hat = hat >= 0 ? hat : giant ? 4 : Rng.Next(4),
             Scarf = scarf != 0 ? new SKColor(scarf) : ScarfColors[Rng.Next(ScarfColors.Length)],
             HatColor = ScarfColors[Rng.Next(ScarfColors.Length)],
             HasNose = nose,
@@ -744,40 +833,72 @@ public sealed class World
             if (Balls[i].Flying && Fly(Balls[i], dt))
                 Balls.RemoveAt(i);
 
+        List<Ball>? broken = null;
+
         foreach (var b in Balls)
         {
             if (b.Below != null || b.Held || b.Flying) continue;
-            float target = Ground.SurfaceY(b.X) - b.R * 0.85f;
-            if (b.Y < target - 0.5f)
+            FollowSupport(b);
+            float target = RestSurface(b) - b.R * 0.85f;
+            if (b.SupportId < 0 && b.Above == null && b.Man == null && b.Y >= target - 2) Roll(b, dt);
+            target = RestSurface(b) - b.R * 0.85f;
+            float lift = Lift(b);
+            if (lift > 0)
             {
+                b.Y = target - lift;
+                b.VY = 0;
+            }
+            else if (b.Y < target - 0.5f)
+            {
+                float py = b.Y;
                 b.VY += 1000 * dt;
                 b.Y += b.VY * dt;
+                if (b.VX != 0)
+                {
+                    // thrown off a window: keeps drifting sideways while falling
+                    b.X = Math.Clamp(b.X + b.VX * dt, b.R, W - b.R);
+                    b.VX *= 1 - Math.Min(1, 0.4f * dt);
+                }
+                if (b.SupportId < 0 && CatchOnWindow(b, py)) target = RestSurface(b) - b.R * 0.85f;
                 if (b.Y >= target)
                 {
+                    // a fall from higher than ~1.5 window title bars... well, about 160 points, breaks it
+                    if (b.VY > BreakSpeed)
+                    {
+                        (broken ??= new List<Ball>()).Add(b);
+                        continue;
+                    }
                     if (b.VY > 250) Powder(b.X, b.Y + b.R, 6, 70, 60);
                     b.Y = target;
                     b.VY = 0;
+                    if (b.Above != null || b.Man != null) b.VX = 0;
                 }
             }
             else
             {
-                b.Y += (target - b.Y) * Math.Min(1, dt * 6);
+                // on a window that moved up: stay on top of it, do not sink into the title bar
+                b.Y = b.SupportId >= 0 && b.Y > target ? target : b.Y + (target - b.Y) * Math.Min(1, dt * 6);
                 b.VY = 0;
             }
         }
 
+        if (broken != null)
+            foreach (var b in broken) Shatter(b);
+
         foreach (var b in Balls)
         {
             if (b.Below != null) continue;
+            float sway = b.Man is { DanceT: > 0 } dm ? MathF.Sin(dm.DanceT * 7) : 0;
             for (var cur = b; cur.Above != null; cur = cur.Above)
             {
                 var a = cur.Above;
-                a.X = cur.X;
+                a.X = cur.X + sway * a.R * 0.15f;
                 a.Y = cur.Y - cur.R * 0.8f - a.R * 0.82f;
             }
 
             var man = b.Man;
             if (man == null) continue;
+            UpdateTricks(b, man, dt);
             man.NextBlink -= dt;
             if (man.NextBlink <= 0)
             {
@@ -833,7 +954,7 @@ public sealed class World
         SKPoint At() => new(x, y - 40);
         double r = Rng.NextDouble();
 
-        if (r < 0.10)
+        if (p.Coal || r < 0.10)
         {
             for (int i = 0; i < 9; i++)
                 Spawn(PKind.Smoke, x + Rand(-6, 6), y, Rand(-20, 20), Rand(-50, -20), Rand(3, 6), Rand(1, 2), new SKColor(60, 60, 66));
@@ -873,6 +994,9 @@ public sealed class World
             g.Dir = x < W / 2 ? -1 : 1;
             g.HasPresent = true;
             g.PresentColor = p.Box;
+            g.PresentCoal = false;
+            g.Hits = 0;
+            g.Reformed = false;
             g.HasCarrot = false;
             g.Target = null;
             g.Victim = null;
@@ -1003,7 +1127,7 @@ public sealed class World
         float front = blade + t.Dir * t.PileH * 0.9f;
         foreach (var ball in Balls)
         {
-            if (ball.Below != null || ball.Above != null || ball.Held || ball.Flying || ball.R > 30) continue;
+            if (ball.Below != null || ball.Above != null || ball.Held || ball.Flying || ball.SupportId >= 0 || ball.R > 30) continue;
             bool ahead = t.Dir > 0 ? ball.X > t.X && ball.X - ball.R < front : ball.X < t.X && ball.X + ball.R > front;
             if (ahead) ball.X = front + t.Dir * ball.R;
         }
@@ -1011,6 +1135,12 @@ public sealed class World
         {
             bool ahead = t.Dir > 0 ? p.X > t.X && p.X - p.Size * 0.5f < front : p.X < t.X && p.X + p.Size * 0.5f > front;
             if (ahead && p.Landed) p.X = front + t.Dir * p.Size * 0.5f;
+        }
+        foreach (var h in Hats)
+        {
+            if (!h.Landed || h.OnPile != null) continue;
+            bool ahead = t.Dir > 0 ? h.X > t.X && h.X - h.R * 0.8f < front : h.X < t.X && h.X + h.R * 0.8f > front;
+            if (ahead) h.X = front + t.Dir * h.R * 0.8f;
         }
 
         if (t.Load > 30 && Rng.NextDouble() < Math.Min(0.9, t.Load / 2500.0))
@@ -1088,9 +1218,11 @@ public sealed class World
         g.Victim = null;
         g.HitT = 99;
         g.Passed = false;
+        g.Hits = 0;
+        g.Reformed = false;
 
         object? target = Presents.Where(p => p.Landed).OrderBy(_ => Rng.Next()).FirstOrDefault();
-        target ??= Balls.Where(b => b.Below == null && b.Man is { HasNose: true }).OrderBy(_ => Rng.Next()).FirstOrDefault();
+        target ??= Balls.Where(b => b.Below == null && b.SupportId < 0 && b.Man is { HasNose: true }).OrderBy(_ => Rng.Next()).FirstOrDefault();
         g.Target = target;
 
         float tx = target switch { Present p => p.X, Ball b => b.X, _ => W / 2 };
@@ -1143,6 +1275,7 @@ public sealed class World
                     {
                         g.HasPresent = true;
                         g.PresentColor = p.Box;
+                        g.PresentCoal = p.Coal;
                         Powder(p.X, p.Y, 6);
                     }
                     else if (g.Target is Ball b && b.Man is { HasNose: true } man)
@@ -1164,8 +1297,8 @@ public sealed class World
                 }
                 break;
             case GrinchState.Escape:
-                g.X += g.Dir * 280 * dt;
-                g.Step += dt * 18;
+                g.X += g.Dir * (g.Reformed ? 90 : 280) * dt;
+                g.Step += dt * (g.Reformed ? 9 : 18);
                 break;
         }
 
@@ -1190,6 +1323,7 @@ public sealed class World
                     Active = true, X = nx, Dir = g.Dir, State = g.State == GrinchState.Steal ? GrinchState.Escape : g.State,
                     StateT = g.StateT, Step = g.Step, LastStepSin = g.LastStepSin, HasCarrot = g.HasCarrot,
                     HasPresent = g.HasPresent, PresentColor = g.PresentColor, HitT = g.HitT,
+                    PresentCoal = g.PresentCoal, Hits = g.Hits, Reformed = g.Reformed,
                 };
                 n.Post(w => w.AcceptGrinch(copy));
             }
@@ -1264,12 +1398,21 @@ public sealed class World
         return lx > -42 && lx < 190 && ly > -64 && ly < 6;
     }
 
-    private void SantaGift()
+    internal void SantaGift()
     {
         var s = Santa;
         if (s.ClickCd > 0) return;
         s.ClickCd = 0.8f;
         float sx = s.X, sy = s.Y;
+        if (s.Extra == 3 && Presents.Count < 8)
+        {
+            // greedy clicking gets a lump of coal
+            s.Extra++;
+            s.ClickCd = 2;
+            DropPresent(s.X - s.Dir * 20, s.Y, s.Dir * 60, coal: true);
+            Say("Хо-хо! А жадинам — уголёк!", () => new SKPoint(sx, sy - 40), 2.5f);
+            return;
+        }
         if (s.Extra >= 3 || Presents.Count >= 8)
         {
             s.ClickCd = 3;
@@ -1282,8 +1425,13 @@ public sealed class World
         Say(Pick(SantaClick), () => new SKPoint(sx, sy - 40), 2f);
     }
 
-    private void DropPresent(float x, float y, float vx)
+    private void DropPresent(float x, float y, float vx, bool coal = false)
     {
+        if (coal)
+        {
+            Presents.Add(new Present { X = x, Y = y, VX = vx, VY = -40, Size = 16, Box = new SKColor(38, 38, 44), Ribbon = new SKColor(70, 70, 80), Coal = true });
+            return;
+        }
         var c = BoxColors[Rng.Next(BoxColors.Length)];
         var rib = BoxColors[(Array.IndexOf(BoxColors, c) + 2) % BoxColors.Length];
         Presents.Add(new Present { X = x, Y = y, VX = vx, VY = -40, Size = Rand(18, 26), Box = c, Ribbon = rib == c ? SKColors.Gold : rib });
@@ -1443,7 +1591,12 @@ public sealed class World
             float dx = b.X - t.X, dy = b.Y - t.Y, rr = b.R + t.R * 0.95f;
             if (dx * dx + dy * dy >= rr * rr) continue;
             var root = t.Root;
-            if (root.Man != null) SayMan(root, Pick(OuchLines));
+            if (root.Man != null)
+            {
+                SayMan(root, Pick(OuchLines));
+                if (t.Above == null && t.Below != null && b.R >= 5) KnockHat(root, b.VX * 0.4f, -Rand(150, 230));
+                ScareBirdsOn(root);
+            }
             else if (t.Above == null && t.Below == null && t.R < 30) t.X = Math.Clamp(t.X + MathF.Sign(b.VX) * 10, t.R, W - t.R);
             Splat(b);
             return true;
@@ -1481,7 +1634,7 @@ public sealed class World
         Powder(b.X, b.Y, 10, 90, 90);
     }
 
-    private void HitGrinch()
+    internal void HitGrinch()
     {
         var g = Grinch;
         g.HitT = 0;
@@ -1491,7 +1644,11 @@ public sealed class World
         if (g.HasPresent)
         {
             g.HasPresent = false;
-            Presents.Add(new Present { X = g.X, Y = feet - 60, VX = -g.Dir * 80, VY = -260, Size = 22, Box = g.PresentColor, Ribbon = SKColors.Gold });
+            Presents.Add(new Present
+            {
+                X = g.X, Y = feet - 60, VX = -g.Dir * 80, VY = -260, Size = g.PresentCoal ? 16 : 22, Box = g.PresentColor,
+                Ribbon = SKColors.Gold, Coal = g.PresentCoal,
+            });
         }
         if (g.HasCarrot)
         {
@@ -1507,6 +1664,23 @@ public sealed class World
         }
         g.Victim = null;
         g.Target = null;
+
+        g.Hits++;
+        if (g.Hits >= 3 && !g.Reformed)
+        {
+            Reform();
+            if (g.State != GrinchState.Escape)
+            {
+                g.State = GrinchState.Escape;
+                g.StateT = 0;
+            }
+            return;
+        }
+        if (g.Reformed)
+        {
+            Say(Pick(new[] { "Эй, я же исправился!", "Ну хватит!", "Я хороший теперь!" }), GrinchAnchor, 2f);
+            return;
+        }
 
         Say(Pick(GrinchOuch), GrinchAnchor, 2f);
         React(CheerLines, 0.5f);
@@ -1608,9 +1782,23 @@ public sealed class World
         }
 
         _clockCheck -= dt;
-        if (_clockCheck > 0 || !S.NewYearShow) return;
+        if (_clockCheck > 0) return;
         _clockCheck = 0.5f;
         var now = DateTime.Now;
+
+        if (now is { Hour: 13, Minute: 37 } && _leetDay != now.DayOfYear && S.Chatter)
+        {
+            _leetDay = now.DayOfYear;
+            React(new[] { "13:37! Элитно.", "1337!", "Время хакеров: 13:37" }, 1);
+        }
+        if (now is { Month: 1, Day: 14, Hour: 0, Minute: < 2 } && _oldNewYear != now.Year && S.NewYearShow)
+        {
+            _oldNewYear = now.Year;
+            StartFireworks(15);
+            Say("Со Старым Новым годом!", () => new SKPoint(W / 2, H * 0.32f), 5, 1.8f);
+        }
+
+        if (!S.NewYearShow) return;
         if (now is { Month: 12, Day: 31, Hour: 23, Minute: 59, Second: >= 50 } && _celebratedYear != now.Year + 1)
         {
             _countdown = 60 - now.Second - now.Millisecond / 1000f;
@@ -1684,6 +1872,18 @@ public sealed class World
         if (men.Count == 1) pool.AddRange(new[] { "Одиноко мне тут...", "Слепи мне компанию!" });
         if (men.Count >= 3) pool.AddRange(new[] { "Нас тут целая банда!", "Снеговики, стройся!" });
         if (Presents.Count > 0) pool.Add("Там подарок! Кликни!");
+        if (!string.IsNullOrEmpty(man.Man.Name)) pool.Add($"Меня зовут {man.Man.Name}, кстати");
+        if (man.Man.HatOff) pool.AddRange(new[] { "Уши мёрзнут без шапки...", "Кто-нибудь видел мою шапку?" });
+        if (man.R >= 66) pool.AddRange(new[] { "Я тут главный", "Склонитесь перед королём!", "Корона не жмёт" });
+        if (man.R <= 13) pool.AddRange(new[] { "Пи!", "Я маленький, но гордый!", "Меня не видно, да?" });
+        if (now is { DayOfWeek: DayOfWeek.Friday, Hour: >= 16 }) pool.AddRange(new[] { "Пятница! Не деплой!", "Уже пятница, закругляйся" });
+        if (now is { DayOfWeek: DayOfWeek.Monday, Hour: < 12 }) pool.Add("Понедельник... держись");
+        if (now is { Month: 12, Day: 25 }) pool.Add("Merry Christmas!");
+        if (now is { Month: 1, Day: 7 }) pool.Add("С Рождеством!");
+        if (now is { Month: 1, Day: 13 }) pool.Add("Сегодня Старый Новый год!");
+        if (Birds.Count > 0) pool.Add("Снегири прилетели!");
+        if (Aurora > 0.3f) pool.Add("Какое сияние...");
+        pool.AddRange(new[] { "Потыкай меня пять раз. Ну пожалуйста", "Говорят, Гринча можно перевоспитать", "Если потрясти окно, будет весело" });
 
         SayMan(man, Pick(pool.ToArray()), 3);
     }
@@ -1722,6 +1922,7 @@ public sealed class World
 
     private void AcceptHeld(List<Ball> stack, Ball held, float offX, float offY, float vx, float vy)
     {
+        foreach (var b in stack) b.SupportId = -1;
         Balls.AddRange(stack);
         if (Held != null)
         {
@@ -1785,6 +1986,9 @@ public sealed class World
         g.HasPresent = src.HasPresent;
         g.PresentColor = src.PresentColor;
         g.HitT = src.HitT;
+        g.PresentCoal = src.PresentCoal;
+        g.Hits = src.Hits;
+        g.Reformed = src.Reformed;
         g.Victim = null;
         g.Passed = false;
         g.Target = null;
@@ -1793,7 +1997,7 @@ public sealed class World
             // still hunting: look for loot ahead on this display
             bool Ahead(float x) => (x - g.X) * g.Dir > 0;
             g.Target = (object?)Presents.Where(p => p.Landed && Ahead(p.X)).OrderBy(_ => Rng.Next()).FirstOrDefault()
-                       ?? Balls.Where(b => b.Below == null && b.Man is { HasNose: true } && Ahead(b.X)).OrderBy(_ => Rng.Next()).FirstOrDefault();
+                       ?? Balls.Where(b => b.Below == null && b.SupportId < 0 && b.Man is { HasNose: true } && Ahead(b.X)).OrderBy(_ => Rng.Next()).FirstOrDefault();
         }
         if (g.Target != null || g.HasPresent || g.HasCarrot) React(GrinchAlert, 0.6f);
     }

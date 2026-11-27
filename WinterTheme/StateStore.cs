@@ -15,6 +15,7 @@ public static class StateStore
         public int Hat { get; set; } = -1;
         public uint Scarf { get; set; }
         public bool Nose { get; set; } = true;
+        public string? Name { get; set; }
     }
 
     public sealed class ScreenDto
@@ -49,6 +50,7 @@ public static class StateStore
                             Hat = root.Man?.Hat ?? -1,
                             Scarf = root.Man != null ? (uint)root.Man.Scarf : 0,
                             Nose = root.Man?.HasNose ?? true,
+                            Name = root.Man?.Name,
                         });
                     }
                     list.Add(dto);
@@ -90,7 +92,7 @@ public static class StateStore
                         w.Balls.Add(b);
                     }
                     if (root != null && s.R.Length >= 3 && s.Hat >= 0)
-                        w.MakeSnowman(root, s.Hat, s.Scarf, s.Nose);
+                        w.MakeSnowman(root, s.Hat, s.Scarf, s.Nose, name: s.Name);
                 }
             }
         }

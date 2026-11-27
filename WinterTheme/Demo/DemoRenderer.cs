@@ -37,6 +37,8 @@ public static class DemoRenderer
         Fireworks(dir);
         Snowball(dir);
         Linked(dir);
+        FunChecks();
+        Night(dir);
     }
 
     private static World NewWorld(bool withWindows = true)
@@ -310,6 +312,252 @@ public static class DemoRenderer
         using var data = img.Encode(SKEncodedImageFormat.Jpeg, 88);
         File.WriteAllBytes(path, data.ToArray());
         Console.WriteLine($"wrote {path}");
+    }
+
+    private static void Check(string name, bool ok, string details = "") =>
+        Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {name} {details}");
+
+    /// <summary>Headless checks of the extra physics and easter eggs (printed, not asserted).</summary>
+    private static void FunChecks()
+    {
+        var s = Settings.Current;
+
+        // a loose ball rolls down a slope
+        {
+            var w = NewWorld(false);
+            for (int i = 0; i < w.Ground.N; i++) w.Ground.H[i] = Math.Max(2, 90 - i * 0.6f);
+            var b = new Ball { X = 60, R = 14 };
+            b.Y = w.Ground.SurfaceY(b.X) - b.R * 0.85f;
+            w.Balls.Add(b);
+            Simulate(w, 3);
+            Check("rolling", b.X > 120, $"x 60 -> {b.X:F0}, r 14 -> {b.R:F1}");
+        }
+
+        // wind takes a hat, a click brings it back
+        {
+            var w = NewWorld(false);
+            for (int i = 0; i < w.Ground.N; i++) w.Ground.H[i] = 20;
+            var man = Stack(w, 600, 40, 28, 20);
+            w.MakeSnowman(man, hat: 0, scarf: 0xFFDC2626);
+            w.KnockHat(man, 150, -200);
+            Simulate(w, 2.5f);
+            var hat = w.Hats.FirstOrDefault();
+            bool landed = hat is { Landed: true };
+            if (hat != null) w.ReturnHat(hat);
+            Simulate(w, 1.2f);
+            Check("hat knocked, landed, returned", landed && !man.Man!.HatOff && w.Hats.Count == 0, $"landed={landed} hatOff={man.Man!.HatOff}");
+
+            w.ForceGust(85);
+            int blown = 0;
+            for (int k = 0; k < 30 * 80 && blown == 0; k++)
+            {
+                w.Update(Dt);
+                if (man.Man.HatOff) blown++;
+            }
+            Check("gust blows the hat off", blown > 0);
+        }
+
+        // five taps: a dance; three snowmen: a chorus
+        {
+            var w = NewWorld(false);
+            for (int i = 0; i < w.Ground.N; i++) w.Ground.H[i] = 20;
+            var a = Stack(w, 300, 40, 28, 20);
+            var b = Stack(w, 600, 40, 28, 20);
+            var c = Stack(w, 900, 40, 28, 20);
+            foreach (var r in new[] { a, b, c }) w.MakeSnowman(r, hat: 1, scarf: 0xFF2563EB);
+            for (int k = 0; k < 5; k++) w.OnTap(b);
+            var lines = new HashSet<string>();
+            float y0 = b.Y, minY = b.Y;
+            for (int k = 0; k < 30 * 9; k++)
+            {
+                w.Update(Dt);
+                foreach (var bb in w.Bubbles) lines.Add(bb.Text);
+                minY = Math.Min(minY, b.Y);
+            }
+            Check("chorus", lines.Contains("Jingle all the way!") && y0 - minY > 3, $"lines={lines.Count} jump={y0 - minY:F1}");
+        }
+
+        // three snowballs reform the Grinch, he gives a present
+        {
+            var w = NewWorld(false);
+            w.StartGrinch();
+            Simulate(w, 2);
+            int before = w.Presents.Count;
+            for (int k = 0; k < 3; k++) w.HitGrinch();
+            Simulate(w, 3);
+            Check("grinch reformed", w.Grinch.Reformed && w.Presents.Count == before + 1, $"presents {before} -> {w.Presents.Count}");
+        }
+
+        // snowmen throw snowballs at a passing Grinch
+        {
+            var w = NewWorld(false);
+            for (int i = 0; i < w.Ground.N; i++) w.Ground.H[i] = 15;
+            foreach (var x in new[] { 250f, 640f, 1030f }) w.MakeSnowman(Stack(w, x, 40, 28, 20), hat: 2, scarf: 0xFF16A34A);
+            w.StartGrinch();
+            int thrown = 0, hits = 0;
+            float lastHit = w.Grinch.HitT;
+            for (int k = 0; k < 30 * 12 && w.Grinch.Active; k++)
+            {
+                int before = w.Balls.Count(bb => bb.Flying);
+                w.Update(Dt);
+                thrown += Math.Max(0, w.Balls.Count(bb => bb.Flying) - before);
+                if (w.Grinch.HitT < lastHit) hits++;
+                lastHit = w.Grinch.HitT;
+            }
+            Check("snowmen defend", thrown > 0, $"thrown={thrown} hits={hits}");
+        }
+
+        // icicles grow under snowy window caps and fall when the window moves
+        {
+            var w = NewWorld();
+            foreach (var p in w.PileOrder)
+                for (int i = 0; i < p.N; i++) p.H[i] = 8;
+            Simulate(w, 150);
+            int icicles = w.PileOrder.Sum(p => p.Icicles.Count);
+            float longest = w.PileOrder.SelectMany(p => p.Icicles).Select(i => i.Len).DefaultIfEmpty(0).Max();
+            w.UpdateWindows(Windows.Select(m => new Quartz.WinInfo(m.Id, new CGRect(m.Rect.Left + 40, m.Rect.Top, m.Rect.Width, m.Rect.Height))).ToList());
+            int shards = w.Particles.Count(p => p.Kind == PKind.Shard);
+            Check("icicles", icicles > 0 && shards >= icicles, $"icicles={icicles} longest={longest:F1} shards={shards}");
+        }
+
+        // shaking a window is an earthquake
+        {
+            var w = NewWorld();
+            var man = Stack(w, 400, 40, 28, 20);
+            w.MakeSnowman(man, hat: 3, scarf: 0xFFDC2626);
+            w.Bubbles.Clear();
+            for (int k = 0; k < 12; k++)
+            {
+                float dx = k % 2 == 0 ? 40 : -40;
+                w.UpdateWindows(Windows.Select(m => new Quartz.WinInfo(m.Id, new CGRect(m.Rect.Left + dx, m.Rect.Top, m.Rect.Width, m.Rect.Height))).ToList());
+                for (int f = 0; f < 3; f++) w.Update(Dt);
+            }
+            Check("window shake quake", w.Bubbles.Any(), string.Join(", ", w.Bubbles.Select(b => b.Text)));
+        }
+
+        // bullfinches land and fly off from the cursor
+        {
+            var w = NewWorld();
+            Accumulate(w, 60);
+            var man = Stack(w, 400, 40, 28, 20);
+            w.MakeSnowman(man, hat: 0, scarf: 0xFFDC2626);
+            w.SpawnFlock();
+            w.SpawnFlock();
+            int n = w.Birds.Count;
+            Simulate(w, 10);
+            int perched = w.Birds.Count(b => b.State == BirdState.Perch);
+            var first = w.Birds.FirstOrDefault(b => b.State == BirdState.Perch);
+            if (first != null)
+            {
+                w.MouseInside = true;
+                w.Mx = first.X + 20;
+                w.My = first.Y;
+                w.Update(Dt);
+            }
+            Check("birds", perched > 0 && first?.State == BirdState.Leave, $"spawned={n} perched={perched}");
+            w.MouseInside = false;
+        }
+
+        // a snowman put on a window rides with it and falls when the window goes away
+        {
+            var w = NewWorld();
+            var term = Windows.First(m => m.Id == 2);
+            float x = term.Rect.MidX - 120;
+            var man = Stack(w, x, 22, 16, 11);
+            w.MakeSnowman(man, hat: 0, scarf: 0xFFDC2626);
+            man.Y = term.Rect.Top - 120;
+            Simulate(w, 1.5f);
+            bool onCap = man.SupportId == 2 && MathF.Abs(man.Y + man.R * 0.85f - term.Rect.Top) < 16;
+            w.UpdateWindows(Windows.Select(m => new Quartz.WinInfo(m.Id, new CGRect(m.Rect.Left + (m.Id == 2 ? 150 : 0), m.Rect.Top - (m.Id == 2 ? 40 : 0), m.Rect.Width, m.Rect.Height))).ToList());
+            Simulate(w, 0.5f);
+            bool rode = man.SupportId == 2 && MathF.Abs(man.X - (x + 150)) < 1 && man.Y + man.R < term.Rect.Top - 30;
+            w.UpdateWindows(Windows.Where(m => m.Id != 2).Select(m => new Quartz.WinInfo(m.Id, new CGRect(m.Rect.Left, m.Rect.Top, m.Rect.Width, m.Rect.Height))).ToList());
+            Simulate(w, 2);
+            bool broke = !w.Balls.Contains(man);
+            Check("snowman on a window", onCap && rode && broke, $"onCap={onCap} rode={rode} broke={broke}");
+
+            // a sharp jerk of the window throws a snowman off
+            var w2 = NewWorld();
+            var man2 = Stack(w2, x, 22, 16, 11);
+            w2.MakeSnowman(man2, hat: 1, scarf: 0xFF2563EB);
+            man2.Y = term.Rect.Top - 60;
+            Simulate(w2, 1.5f);
+            bool on2 = man2.SupportId == 2;
+            foreach (var dx in new[] { 40f, 80f, 40f })
+            {
+                w2.UpdateWindows(Windows.Select(m => new Quartz.WinInfo(m.Id, new CGRect(m.Rect.Left + (m.Id == 2 ? dx : 0), m.Rect.Top, m.Rect.Width, m.Rect.Height))).ToList());
+                for (int f = 0; f < 3; f++) w2.Update(Dt);
+            }
+            bool off = man2.SupportId == -1;
+            Simulate(w2, 2);
+            Check("jerk shakes it off and it breaks", on2 && off && !w2.Balls.Contains(man2), $"on={on2} off={off} broken={!w2.Balls.Contains(man2)}");
+
+            // a gentle drop survives
+            var w3 = NewWorld(false);
+            var ball = new Ball { X = 500, R = 15, Y = w3.Ground.SurfaceY(500) - 15 * 0.85f - 100 };
+            w3.Balls.Add(ball);
+            Simulate(w3, 1.5f);
+            Check("short drop survives", w3.Balls.Contains(ball));
+        }
+
+        // giant snowman wears a crown; Santa gives coal to the greedy
+        {
+            var w = NewWorld(false);
+            var king = Stack(w, 600, 70, 48, 32);
+            w.MakeSnowman(king);
+            w.StartSanta();
+            for (int k = 0; k < 5; k++)
+            {
+                w.SantaGift();
+                Simulate(w, 2.1f);
+            }
+            Check("crown + coal", king.Man!.Hat == 4 && w.Presents.Any(p => p.Coal), $"hat={king.Man.Hat} presents={w.Presents.Count} coal={w.Presents.Count(p => p.Coal)}");
+        }
+
+        // melting shrinks snowmen until they collapse
+        {
+            var w = NewWorld(false);
+            var man = Stack(w, 600, 14, 9, 6);
+            w.MakeSnowman(man, hat: 2, scarf: 0xFFDC2626);
+            s.Melt = true;
+            Simulate(w, 70);
+            s.Melt = false;
+            Check("melting", !w.Balls.Contains(man), $"balls left={w.Balls.Count}");
+        }
+    }
+
+    /// <summary>Night scene: aurora, bullfinches, icicles, a king and a dancing snowman.</summary>
+    private static void Night(string dir)
+    {
+        var w = NewWorld();
+        Accumulate(w, 200);
+        foreach (var p in w.PileOrder)
+            for (int i = 0; i < p.N; i++) p.H[i] = Math.Max(p.H[i], 7);
+        Simulate(w, 160);
+
+        var king = Stack(w, 980, 70, 48, 32);
+        w.MakeSnowman(king);
+        var dancer = Stack(w, 700, 38, 27, 19);
+        w.MakeSnowman(dancer, hat: 2, scarf: 0xFF16A34A);
+        var hatless = Stack(w, 330, 36, 25, 18);
+        w.MakeSnowman(hatless, hat: 0, scarf: 0xFF2563EB);
+        var term = Windows.First(m => m.Id == 2);
+        var rider = Stack(w, term.Rect.Left + 330, 20, 14, 10);
+        w.MakeSnowman(rider, hat: 3, scarf: 0xFFEAB308);
+        rider.Y = term.Rect.Top - 80;
+        Simulate(w, 1);
+        w.KnockHat(hatless, -60, -150);
+        w.StartAurora(60);
+        w.SpawnFlock();
+        w.SpawnFlock();
+        Simulate(w, 9);
+        for (int k = 0; k < 5; k++) w.OnTap(dancer);
+        Simulate(w, 1.1f);
+        w.Bubbles.Clear();
+        w.Say("Jingle bells!", () => new SKPoint(dancer.Top.X, dancer.Top.Y - dancer.Top.R * 2.3f), 3);
+        w.Say("Склонитесь!", () => new SKPoint(king.Top.X, king.Top.Y - king.Top.R * 2.6f), 3);
+
+        Save(w, Path.Combine(dir, "night.jpg"));
     }
 
     // ------------------------------------------------------------------ output

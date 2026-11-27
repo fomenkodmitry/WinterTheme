@@ -23,6 +23,16 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
 - At midnight on Dec 31 there is a 10-second countdown, then fireworks, confetti and Santa.
   To see it right away, choose "Репетиция Нового года" in the menu. Fireworks are also in the menu ("Салют!").
 - A garland of lights hangs under the menu bar.
+- **Snowmen on windows:** drop a snowball or a whole snowman onto the top of a window. It rides along when you drag
+  the window, and falls off when the window closes or minimizes, or when you jerk the window sharply. A fall from
+  higher than about 160 points smashes a ball or a snowman into snow. You can also roll a ball along the snow on
+  a window to grow it. The Grinch can't reach snowmen up there.
+- More physics: loose balls roll down the drifts and push each other, strong gusts blow hats off (click a hat to put
+  it back), wind blows powder off the drifts and window caps, icicles grow under snowy window tops (swipe the cursor
+  through one to knock it down), and with melting on, snowmen shrink and collapse.
+- Snowmen have names, follow the cursor with their eyes, and throw snowballs at the Grinch.
+- Bullfinches land on windows, snowmen and the drift, and fly off when the cursor comes close.
+- Northern lights on some nights (or from the menu).
 - **Several displays work as one desktop:** Santa flies across all of them, the tractor drives on to the next display
   and clears it too, and the Grinch runs through. Drag a snowball or a whole snowman onto the other display,
   or throw a snowball across. Displays must touch side by side in System Settings → Displays.
@@ -40,6 +50,20 @@ A menu bar app (C#, .NET 10, Avalonia 11.3) that draws winter on top of the macO
 
 ![Santa crossing from one display to the next](docs/two-displays.jpg)
 
+![Northern lights, bullfinches, icicles, a snowman on a window and the Snow King](docs/night.jpg)
+
+<details>
+<summary>Easter eggs (spoilers)</summary>
+
+- Tap a snowman 5 times quickly: it dances. With three or more snowmen, they sing together.
+- Build a snowman with a huge bottom ball: you get the Snow King with a crown. A tiny one squeaks.
+- Hit the Grinch with three snowballs in one visit: his heart grows and he gives you a present.
+- Keep clicking Santa's sleigh after three extra presents: you get coal.
+- Shake a window fast: earthquake. Snowmen jump, presents bounce, hats fly off.
+- Some presents hide a surprise, and snowmen have special lines at 13:37, on Friday evenings, Christmas and the Old New Year.
+
+</details>
+
 The screenshots are rendered with the app's own simulation and painter on a mock desktop:
 `dotnet run --project WinterTheme -c Release -- --render-screens docs`.
 
@@ -49,9 +73,9 @@ Snowmen and settled snow are saved in `~/Library/Application Support/WinterTheme
 
 ```bash
 dotnet run --project WinterTheme   # dev
-./build-app.sh                     # dist/WinterTheme-1.2.0-arm64.dmg (Apple Silicon)
+./build-app.sh                     # dist/WinterTheme-1.3.0-arm64.dmg (Apple Silicon)
 ARCH=x64 ./build-app.sh            # Intel
-ARCH=all VERSION=1.2.0 ./build-app.sh
+ARCH=all VERSION=1.3.0 ./build-app.sh
 ```
 
 ## Install
@@ -65,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/fomenkodmitry/WinterTheme/main/inst
 It downloads the DMG, copies the app to `/Applications` and starts it. Files downloaded with `curl` are not quarantined, so there is no Gatekeeper prompt.
 The snowflake appears in the menu bar. Turn on "Запускать при входе" there to start it at login.
 
-Or download [`release/WinterTheme-1.2.0-arm64.dmg`](release/WinterTheme-1.2.0-arm64.dmg) and drag **WinterTheme** onto **Applications**.
+Or download [`release/WinterTheme-1.3.0-arm64.dmg`](release/WinterTheme-1.3.0-arm64.dmg) and drag **WinterTheme** onto **Applications**.
 The app is ad-hoc signed, not notarized, so macOS says it cannot verify that the app is free of malware. To open it anyway, do one of these:
 - System Settings → Privacy & Security → click "Open Anyway" next to the WinterTheme message.
 - Run `xattr -dr com.apple.quarantine /Applications/WinterTheme.app`.

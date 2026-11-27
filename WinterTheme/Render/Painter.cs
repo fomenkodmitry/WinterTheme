@@ -28,14 +28,21 @@ public sealed class Painter
     public void Draw(SKCanvas c, World w)
     {
         c.Clear(SKColors.Transparent);
+        if (w.Aurora > 0.01f) DrawAurora(c, w);
         DrawFlakes(c, w, far: true);
         if (w.Santa.Active) DrawSanta(c, w);
-        foreach (var p in w.PileOrder) DrawPile(c, p, true, w.Time, 15);
+        foreach (var p in w.PileOrder)
+        {
+            DrawPile(c, p, true, w.Time, 15);
+            if (p.Icicles.Count > 0) DrawIcicles(c, p);
+        }
         if (Settings.Current.Garland) DrawGarland(c, w);
         DrawPile(c, w.Ground, false, w.Time, 60);
         foreach (var p in w.Presents) DrawPresent(c, p);
         if (w.Tractor.Active) DrawTractor(c, w);
         DrawBalls(c, w);
+        foreach (var h in w.Hats) DrawFlyingHat(c, h);
+        foreach (var b in w.Birds) DrawBird(c, b);
         if (w.Grinch.Active) DrawGrinch(c, w);
         DrawParticles(c, w);
         DrawFlakes(c, w, far: false);
@@ -199,6 +206,41 @@ public sealed class Painter
                     _fill.Color = SKColors.White;
                     c.DrawCircle(p.X, p.Y, 1.8f, _fill);
                     break;
+                case PKind.Note:
+                {
+                    var col = A(p.Color, Math.Min(1, life * 1.5f));
+                    float nx = p.X + MathF.Sin(p.Rot + p.Life * 4) * 4;
+                    _fill.Color = col;
+                    c.DrawOval(nx, p.Y, 3.2f, 2.4f, _fill);
+                    _stroke.StrokeWidth = 1.4f;
+                    _stroke.Color = col;
+                    c.DrawLine(nx + 2.8f, p.Y, nx + 2.8f, p.Y - 11, _stroke);
+                    c.DrawLine(nx + 2.8f, p.Y - 11, nx + 7, p.Y - 7, _stroke);
+                    break;
+                }
+                case PKind.Heart:
+                    DrawHeart(c, p.X, p.Y, p.Size, A(p.Color, Math.Min(1, life * 1.5f)));
+                    break;
+                case PKind.Drop:
+                    _fill.Color = A(p.Color, 0.85f);
+                    c.DrawOval(p.X, p.Y, 1.3f, 2f, _fill);
+                    break;
+                case PKind.Shard:
+                {
+                    c.Save();
+                    c.Translate(p.X, p.Y);
+                    c.RotateRadians(p.Rot);
+                    using var shard = new SKPath();
+                    float half = p.Size * 0.5f, wdt = 1.5f + p.Size * 0.12f;
+                    shard.MoveTo(-wdt, -half);
+                    shard.LineTo(wdt, -half);
+                    shard.LineTo(0, half);
+                    shard.Close();
+                    _fill.Color = A(p.Color, 0.9f);
+                    c.DrawPath(shard, _fill);
+                    c.Restore();
+                    break;
+                }
                 case PKind.Star:
                 {
                     float tx = p.X - p.VX * 0.14f, ty = p.Y - p.VY * 0.14f;
@@ -285,7 +327,7 @@ public sealed class Painter
     {
         foreach (var root in w.Balls.Where(b => b.Below == null).OrderBy(b => b.R))
         {
-            float gy = w.Ground.SurfaceY(root.X);
+            float gy = w.RestSurface(root);
             _fill.Color = new SKColor(60, 80, 120, 50);
             c.DrawOval(root.X, gy + 1, root.R * 0.95f, root.R * 0.18f, _fill);
 
@@ -308,8 +350,8 @@ public sealed class Painter
                     c.DrawCircle(body.X + MathF.Sin(k * 1.3f) * 1.5f, body.Y - body.R * 0.35f + k * body.R * 0.38f, Math.Max(1.6f, body.R * 0.085f), _fill);
                 }
                 DrawScarf(c, body, head, man, w.Time);
-                DrawFace(c, head, man);
-                DrawHat(c, head, man);
+                DrawFace(c, head, man, w);
+                if (!man.HatOff) DrawHat(c, head, man);
             }
         }
     }
@@ -392,14 +434,22 @@ public sealed class Painter
             c.DrawLine(head.X + k * wdt * 0.18f, ny - hgt * 0.35f, head.X + k * wdt * 0.18f, ny + hgt * 0.35f, _stroke);
     }
 
-    private void DrawFace(SKCanvas c, Ball head, Snowman m)
+    private void DrawFace(SKCanvas c, Ball head, Snowman m, World w)
     {
         float r = head.R;
         _fill.Color = Coal;
         float eyeR = Math.Max(1.4f, r * 0.1f);
         float eyeH = m.Blink > 0 ? eyeR * 0.2f : eyeR;
-        c.DrawOval(head.X - r * 0.32f, head.Y - r * 0.18f, eyeR, eyeH, _fill);
-        c.DrawOval(head.X + r * 0.26f, head.Y - r * 0.18f, eyeR, eyeH, _fill);
+        // the eyes follow the cursor a little
+        float lx = 0, ly = 0;
+        if (w.MouseInside)
+        {
+            float dx = w.Mx - head.X, dy = w.My - head.Y, len = MathF.Max(1, MathF.Sqrt(dx * dx + dy * dy));
+            lx = dx / len * r * 0.06f;
+            ly = dy / len * r * 0.05f;
+        }
+        c.DrawOval(head.X - r * 0.32f + lx, head.Y - r * 0.18f + ly, eyeR, eyeH, _fill);
+        c.DrawOval(head.X + r * 0.26f + lx, head.Y - r * 0.18f + ly, eyeR, eyeH, _fill);
         for (int k = 0; k < 5; k++)
         {
             float t = (k - 2) / 2f;
@@ -427,28 +477,59 @@ public sealed class Painter
         }
     }
 
-    private void DrawHat(SKCanvas c, Ball head, Snowman m)
+    private void DrawHat(SKCanvas c, Ball head, Snowman m) => DrawHatAt(c, head.X, head.Y - head.R * 0.78f, head.R, m.Hat, m.HatColor);
+
+    /// <summary>Hat whose brim sits at (<paramref name="x"/>, <paramref name="top"/>) on a head of radius <paramref name="r"/>.</summary>
+    private void DrawHatAt(SKCanvas c, float x, float top, float r, int kind, SKColor color)
     {
-        float r = head.R;
-        float top = head.Y - r * 0.78f;
-        switch (m.Hat)
+        switch (kind)
         {
+            case 4: // crown for the giant
+            {
+                using var crown = new SKPath();
+                crown.MoveTo(x - r * 0.62f, top + r * 0.05f);
+                crown.LineTo(x - r * 0.68f, top - r * 0.55f);
+                crown.LineTo(x - r * 0.34f, top - r * 0.25f);
+                crown.LineTo(x, top - r * 0.75f);
+                crown.LineTo(x + r * 0.34f, top - r * 0.25f);
+                crown.LineTo(x + r * 0.68f, top - r * 0.55f);
+                crown.LineTo(x + r * 0.62f, top + r * 0.05f);
+                crown.Close();
+                using var sh = SKShader.CreateLinearGradient(new SKPoint(0, top - r * 0.75f), new SKPoint(0, top + r * 0.05f),
+                    new[] { new SKColor(255, 236, 140), new SKColor(232, 176, 40) }, null, SKShaderTileMode.Clamp);
+                _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
+                _fill.Shader = sh;
+                c.DrawPath(crown, _fill);
+                _fill.Shader = null;
+                _stroke.StrokeWidth = Math.Max(1, r * 0.03f);
+                _stroke.Color = new SKColor(170, 120, 20);
+                c.DrawPath(crown, _stroke);
+                _fill.Color = new SKColor(220, 38, 38);
+                c.DrawCircle(x, top - r * 0.12f, r * 0.08f, _fill);
+                _fill.Color = new SKColor(37, 99, 235);
+                c.DrawCircle(x - r * 0.38f, top - r * 0.1f, r * 0.06f, _fill);
+                c.DrawCircle(x + r * 0.38f, top - r * 0.1f, r * 0.06f, _fill);
+                _fill.Color = new SKColor(255, 250, 220);
+                foreach (var (px, py) in new[] { (-0.68f, -0.55f), (0f, -0.75f), (0.68f, -0.55f) })
+                    c.DrawCircle(x + px * r, top + py * r, r * 0.06f, _fill);
+                break;
+            }
             case 0: // top hat
                 _fill.Color = new SKColor(25, 25, 30);
-                c.DrawRoundRect(head.X - r * 0.8f, top - r * 0.12f, r * 1.6f, r * 0.18f, r * 0.08f, r * 0.08f, _fill);
-                c.DrawRect(head.X - r * 0.52f, top - r * 1.0f, r * 1.04f, r * 0.92f, _fill);
-                _fill.Color = m.HatColor;
-                c.DrawRect(head.X - r * 0.52f, top - r * 0.3f, r * 1.04f, r * 0.17f, _fill);
+                c.DrawRoundRect(x - r * 0.8f, top - r * 0.12f, r * 1.6f, r * 0.18f, r * 0.08f, r * 0.08f, _fill);
+                c.DrawRect(x - r * 0.52f, top - r * 1.0f, r * 1.04f, r * 0.92f, _fill);
+                _fill.Color = color;
+                c.DrawRect(x - r * 0.52f, top - r * 0.3f, r * 1.04f, r * 0.17f, _fill);
                 break;
             case 1: // bucket
             {
                 using var path = new SKPath();
-                path.MoveTo(head.X - r * 0.72f, top + r * 0.05f);
-                path.LineTo(head.X + r * 0.72f, top + r * 0.05f);
-                path.LineTo(head.X + r * 0.5f, top - r * 0.85f);
-                path.LineTo(head.X - r * 0.5f, top - r * 0.85f);
+                path.MoveTo(x - r * 0.72f, top + r * 0.05f);
+                path.LineTo(x + r * 0.72f, top + r * 0.05f);
+                path.LineTo(x + r * 0.5f, top - r * 0.85f);
+                path.LineTo(x - r * 0.5f, top - r * 0.85f);
                 path.Close();
-                using var sh = SKShader.CreateLinearGradient(new SKPoint(head.X - r, 0), new SKPoint(head.X + r, 0),
+                using var sh = SKShader.CreateLinearGradient(new SKPoint(x - r, 0), new SKPoint(x + r, 0),
                     new[] { new SKColor(120, 130, 145), new SKColor(205, 212, 222), new SKColor(110, 118, 132) }, null, SKShaderTileMode.Clamp);
                 _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
                 _fill.Shader = sh;
@@ -456,35 +537,35 @@ public sealed class Painter
                 _fill.Shader = null;
                 _stroke.StrokeWidth = Math.Max(1, r * 0.05f);
                 _stroke.Color = new SKColor(80, 88, 100);
-                c.DrawLine(head.X - r * 0.7f, top - r * 0.02f, head.X + r * 0.7f, top - r * 0.02f, _stroke);
+                c.DrawLine(x - r * 0.7f, top - r * 0.02f, x + r * 0.7f, top - r * 0.02f, _stroke);
                 break;
             }
             case 2: // beanie
             {
-                var rect = new SKRect(head.X - r * 0.82f, top - r * 0.6f, head.X + r * 0.82f, top + r * 0.6f);
+                var rect = new SKRect(x - r * 0.82f, top - r * 0.6f, x + r * 0.82f, top + r * 0.6f);
                 using var path = new SKPath();
                 path.AddArc(rect, 180, 180);
                 path.Close();
-                _fill.Color = m.HatColor;
+                _fill.Color = color;
                 c.DrawPath(path, _fill);
                 _fill.Color = new SKColor(255, 255, 255, 200);
-                c.DrawRoundRect(head.X - r * 0.86f, top - r * 0.08f, r * 1.72f, r * 0.22f, r * 0.1f, r * 0.1f, _fill);
+                c.DrawRoundRect(x - r * 0.86f, top - r * 0.08f, r * 1.72f, r * 0.22f, r * 0.1f, r * 0.1f, _fill);
                 _fill.Color = Snow;
-                c.DrawCircle(head.X, top - r * 0.66f, r * 0.2f, _fill);
+                c.DrawCircle(x, top - r * 0.66f, r * 0.2f, _fill);
                 break;
             }
             default: // santa hat
             {
                 using var path = new SKPath();
-                path.MoveTo(head.X - r * 0.75f, top + r * 0.05f);
-                path.QuadTo(head.X - r * 0.1f, top - r * 1.3f, head.X - r * 0.95f, top - r * 0.9f);
-                path.QuadTo(head.X + r * 0.2f, top - r * 1.5f, head.X + r * 0.75f, top + r * 0.05f);
+                path.MoveTo(x - r * 0.75f, top + r * 0.05f);
+                path.QuadTo(x - r * 0.1f, top - r * 1.3f, x - r * 0.95f, top - r * 0.9f);
+                path.QuadTo(x + r * 0.2f, top - r * 1.5f, x + r * 0.75f, top + r * 0.05f);
                 path.Close();
                 _fill.Color = new SKColor(210, 30, 40);
                 c.DrawPath(path, _fill);
                 _fill.Color = Snow;
-                c.DrawRoundRect(head.X - r * 0.82f, top - r * 0.1f, r * 1.64f, r * 0.24f, r * 0.12f, r * 0.12f, _fill);
-                c.DrawCircle(head.X - r * 0.95f, top - r * 0.9f, r * 0.17f, _fill);
+                c.DrawRoundRect(x - r * 0.82f, top - r * 0.1f, r * 1.64f, r * 0.24f, r * 0.12f, r * 0.12f, _fill);
+                c.DrawCircle(x - r * 0.95f, top - r * 0.9f, r * 0.17f, _fill);
                 break;
             }
         }
@@ -496,6 +577,16 @@ public sealed class Painter
     {
         float fade = p.Age > 880 ? Math.Max(0, (900 - p.Age) / 20) : 1;
         float s = p.Size;
+        if (p.Coal)
+        {
+            using var lump = Furry(p.X, p.Y, s * 0.6f, s * 0.45f, 7, 0.9f);
+            _fill.Color = A(new SKColor(34, 34, 40), fade);
+            c.DrawPath(lump, _fill);
+            _fill.Color = A(new SKColor(120, 125, 140), 0.6f * fade);
+            c.DrawCircle(p.X - s * 0.18f, p.Y - s * 0.15f, s * 0.08f, _fill);
+            c.DrawCircle(p.X + s * 0.12f, p.Y - s * 0.2f, s * 0.05f, _fill);
+            return;
+        }
         _fill.Color = A(p.Box, fade);
         c.DrawRoundRect(p.X - s / 2, p.Y - s / 2, s, s, 2, 2, _fill);
         _fill.Color = A(new SKColor(0, 0, 0), 0.15f * fade);
@@ -722,8 +813,26 @@ public sealed class Painter
         c.DrawCircle(15.5f, -75, 1.4f, _fill);
         _stroke.StrokeWidth = 2;
         _stroke.Color = new SKColor(40, 80, 20);
-        c.DrawLine(1, -81, 9, -77.5f, _stroke);
-        c.DrawLine(18, -81, 11, -77.5f, _stroke);
+        if (g.Reformed)
+        {
+            // kind brows, rosy cheeks and a heart that grew
+            c.DrawLine(1, -80, 9, -81.5f, _stroke);
+            c.DrawLine(18, -80, 11, -81.5f, _stroke);
+            _fill.Color = new SKColor(255, 120, 140, 150);
+            c.DrawCircle(2, -69, 3, _fill);
+            c.DrawCircle(19, -70, 3, _fill);
+            c.Save();
+            float beat = 1 + 0.15f * MathF.Abs(MathF.Sin(w.Time * 5));
+            c.Translate(4, -120);
+            c.Scale(beat * g.Dir, beat);
+            DrawHeart(c, 0, 0, 7, new SKColor(240, 60, 100));
+            c.Restore();
+        }
+        else
+        {
+            c.DrawLine(1, -81, 9, -77.5f, _stroke);
+            c.DrawLine(18, -81, 11, -77.5f, _stroke);
+        }
 
         // evil grin
         using (var mouth = new SKPath())
@@ -894,6 +1003,163 @@ public sealed class Painter
         {
             _fill.Color = new SKColor(40, 30, 25);
             c.DrawCircle(x + 25, -33, 1.6f, _fill);
+        }
+    }
+
+    // ------------------------------------------------------------------ extras
+
+    private void DrawHeart(SKCanvas c, float x, float y, float size, SKColor col)
+    {
+        using var path = new SKPath();
+        float s = size;
+        path.MoveTo(x, y + s * 0.9f);
+        path.CubicTo(x - s * 1.4f, y - s * 0.1f, x - s * 0.6f, y - s * 1.1f, x, y - s * 0.35f);
+        path.CubicTo(x + s * 0.6f, y - s * 1.1f, x + s * 1.4f, y - s * 0.1f, x, y + s * 0.9f);
+        path.Close();
+        _fill.Color = col;
+        c.DrawPath(path, _fill);
+    }
+
+    private void DrawFlyingHat(SKCanvas c, FlyingHat h)
+    {
+        float fade = h.Owner == null && h.Age > 110 ? Math.Max(0, (120 - h.Age) / 10) : 1;
+        if (fade <= 0) return;
+        c.Save();
+        c.Translate(h.X, h.Y);
+        c.RotateRadians(h.Rot);
+        if (fade < 1) c.SaveLayer(new SKPaint { Color = SKColors.White.WithAlpha((byte)(fade * 255)) });
+        DrawHatAt(c, 0, 0, h.R, h.Kind, h.Color);
+        if (fade < 1) c.Restore();
+        c.Restore();
+    }
+
+    private void DrawIcicles(SKCanvas c, WindowPile p)
+    {
+        foreach (var ic in p.Icicles)
+        {
+            if (ic.Len < 0.8f || !p.VisibleAt(ic.X)) continue;
+            float half = 1.2f + ic.Len * 0.14f, y0 = p.BaseY - 1, y1 = p.BaseY + ic.Len;
+            using var path = new SKPath();
+            path.MoveTo(ic.X - half, y0);
+            path.LineTo(ic.X + half, y0);
+            path.QuadTo(ic.X + half * 0.4f, y0 + ic.Len * 0.5f, ic.X, y1);
+            path.QuadTo(ic.X - half * 0.5f, y0 + ic.Len * 0.5f, ic.X - half, y0);
+            path.Close();
+            using var sh = SKShader.CreateLinearGradient(new SKPoint(0, y0), new SKPoint(0, y1),
+                new[] { new SKColor(245, 250, 255, 240), new SKColor(190, 220, 250, 200), new SKColor(170, 205, 245, 120) },
+                null, SKShaderTileMode.Clamp);
+            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
+            _fill.Shader = sh;
+            c.DrawPath(path, _fill);
+            _fill.Shader = null;
+            _stroke.StrokeWidth = 0.7f;
+            _stroke.Color = new SKColor(255, 255, 255, 200);
+            c.DrawLine(ic.X - half * 0.35f, y0 + 1, ic.X - half * 0.1f, y0 + ic.Len * 0.6f, _stroke);
+        }
+    }
+
+    private void DrawBird(SKCanvas c, Bird b)
+    {
+        bool flying = b.State != BirdState.Perch;
+        float hop = b.HopT > 0 ? MathF.Sin(MathF.PI * (1 - b.HopT / 0.25f)) * 4 : 0;
+        c.Save();
+        c.Translate(b.X, b.Y - hop);
+        c.Scale(b.Dir, 1);
+
+        var back = new SKColor(112, 118, 132);
+        var black = new SKColor(28, 28, 34);
+        var breast = new SKColor(226, 78, 58);
+
+        if (!flying)
+        {
+            _stroke.StrokeWidth = 0.9f;
+            _stroke.Color = new SKColor(60, 50, 50);
+            c.DrawLine(-1.2f, -1.5f, -1.8f, 0, _stroke);
+            c.DrawLine(1.2f, -1.5f, 1.6f, 0, _stroke);
+        }
+
+        // tail
+        _stroke.StrokeWidth = 2.2f;
+        _stroke.Color = black;
+        c.DrawLine(-4.5f, -5, -9, flying ? -5 : -2.5f, _stroke);
+
+        // body and red breast
+        _fill.Color = back;
+        c.DrawOval(0, -5.5f, 5.8f, 4.6f, _fill);
+        _fill.Color = breast;
+        c.DrawOval(1.6f, -4.4f, 4.2f, 3.4f, _fill);
+
+        // head (pecks down now and then)
+        c.Save();
+        if (b.Peck > 0) c.RotateDegrees(MathF.Sin(MathF.PI * b.Peck / 0.35f) * 35, 3, -8);
+        _fill.Color = black;
+        c.DrawCircle(3.6f, -9.2f, 3.3f, _fill);
+        _fill.Color = new SKColor(70, 70, 76);
+        using (var beak = new SKPath())
+        {
+            beak.MoveTo(6.4f, -10.2f);
+            beak.LineTo(8.6f, -9.2f);
+            beak.LineTo(6.4f, -8.2f);
+            beak.Close();
+            c.DrawPath(beak, _fill);
+        }
+        c.Restore();
+
+        // wing: folded, or flapping in flight
+        if (flying)
+        {
+            float f = MathF.Sin(b.Flap);
+            using var wing = new SKPath();
+            wing.MoveTo(-2.5f, -6.5f);
+            wing.LineTo(2.5f, -6.5f);
+            wing.LineTo(-3.5f, -6.5f - f * 8);
+            wing.Close();
+            _fill.Color = black;
+            c.DrawPath(wing, _fill);
+        }
+        else
+        {
+            _fill.Color = black;
+            c.DrawOval(-1.4f, -5.8f, 3.6f, 2.4f, _fill);
+            _stroke.StrokeWidth = 0.9f;
+            _stroke.Color = new SKColor(235, 235, 240);
+            c.DrawLine(-3.6f, -5.6f, 0.6f, -5.2f, _stroke);
+        }
+        c.Restore();
+    }
+
+    private static readonly SKColor[] AuroraColors = { new(80, 255, 170), new(90, 210, 255), new(190, 120, 255) };
+
+    private void DrawAurora(SKCanvas c, World w)
+    {
+        float t = w.Time, a = w.Aurora;
+        for (int k = 0; k < AuroraColors.Length; k++)
+        {
+            using var path = new SKPath();
+            float minY = float.MaxValue, maxY = 0;
+            var tops = new List<SKPoint>();
+            var bottoms = new List<SKPoint>();
+            for (float x = -30; x <= w.W + 30; x += 24)
+            {
+                float top = w.MenuBarH + 30 + k * 28 + 28 * MathF.Sin(x * 0.0035f + t * 0.25f + k * 1.7f) + 12 * MathF.Sin(x * 0.011f - t * 0.4f + k);
+                float h = 110 + 45 * MathF.Sin(x * 0.006f + t * 0.3f + k * 2.1f);
+                tops.Add(new SKPoint(x, top));
+                bottoms.Add(new SKPoint(x, top + h));
+                minY = Math.Min(minY, top);
+                maxY = Math.Max(maxY, top + h);
+            }
+            path.MoveTo(tops[0]);
+            foreach (var pt in tops) path.LineTo(pt);
+            for (int i = bottoms.Count - 1; i >= 0; i--) path.LineTo(bottoms[i]);
+            path.Close();
+
+            var col = AuroraColors[k];
+            using var sh = SKShader.CreateLinearGradient(new SKPoint(0, minY), new SKPoint(0, maxY),
+                new[] { A(col, 0), A(col, 0.2f * a), A(col, 0.06f * a), A(col, 0) }, new[] { 0f, 0.18f, 0.6f, 1f }, SKShaderTileMode.Clamp);
+            _fill.Color = SKColors.White; // shader output is multiplied by paint alpha
+            _fill.Shader = sh;
+            c.DrawPath(path, _fill);
+            _fill.Shader = null;
         }
     }
 

@@ -158,6 +158,8 @@ public sealed class WindowPile : Pile
     public readonly int Id;
     public readonly float Bx, By, Bw, Bh;
     public float SpillL, SpillR;
+    public readonly List<Icicle> Icicles = new();
+    public float IcicleT = 4;
 
     public WindowPile(int id, float x, float y, float w, float h)
         : base(x + 2, w - 4, y, 15, 1.5f, true)
